@@ -1,6 +1,7 @@
 # cdpsh — Specification
 
-Status: initial design draft; no implementation yet. Updated: October 11, 2026.
+Status: v0.1 implemented; see README.md for verification and supported limits.
+Updated: October 11, 2026.
 
 cdpsh is a lightweight browser CLI written in Go for agents. It connects to an
 existing Chromium browser through the Chrome DevTools Protocol (CDP) and provides
@@ -8,7 +9,7 @@ small, composable operations for observing and acting. Agents can use it to run
 workflows, diagnose failures, and build reusable helpers through the shell, with
 or without relevant skills.
 
-All examples describe the planned interface. They are not executable yet.
+Examples describe the implemented interface; example target IDs are placeholders.
 “Must” denotes a v0.1 contract; “Proposal” denotes a detail still open for discussion.
 
 ## 1. Agreed design decisions
@@ -373,14 +374,26 @@ v0.1 is accepted only when the following scenarios work against local test pages
 - `eval` exceptions, timeouts, and unsupported features produce structured errors.
 - An agent can perform the core workflow using `help` and `schema` without a skill.
 
-## 13. Details still to be specified
+## 13. Implementation details
 
-The design philosophy in Section 1 is agreed. The following implementation details
-remain open; they must not change the agreed principles:
+The design philosophy in Section 1 is agreed. v0.1 makes these implementation
+choices without changing those principles:
 
-- Exact `cdproto`/transport version and minimum Go toolchain version.
-- Supported Chromium versions and limits for cross-origin frames/shadow DOM.
-- Final flags, output budgets, deadlines, and artifact directories.
+The initial implementation pins Go 1.24+ and dependency versions in go.mod.
+README.md records final budgets, deadlines, directories, editor/frame limits,
+and Chrome 155 acceptance on Windows. Linux/macOS are cross-build verified;
+Linux browser acceptance is included in the supplied CI workflow. Hidden-tab
+screenshots may require an explicit `tab activate ID`, as reported by a timeout hint.
+
+- Transport: chromedp v0.14.2, cdproto v0.0.0-20250724212937-08a3db8b4327,
+  and a flattened-session router; Go 1.24 minimum.
+- Frame actions: main frame only; unsupported child frames are discoverable.
+  Open shadow DOM is supported by AX references/role targets. Custom editors
+  and non-text input types have no high-level fill contract.
+- Defaults: 60 observation elements, 12 KiB output, 10-second action/wait deadlines,
+  30-second navigation/connect deadlines; absolute artifact paths under CDPSH_HOME.
+- Native macOS browser acceptance and a broader Chromium-version matrix remain
+  unverified. CI configuration is supplied; its hosted runs have not been executed here.
 
 ## 14. References and context
 
