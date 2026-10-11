@@ -1,9 +1,9 @@
-# cdpsh — Specification
+# cdp — Specification
 
 Status: v0.1 implemented; see README.md for verification and supported limits.
 Updated: October 11, 2026.
 
-cdpsh is a lightweight browser CLI written in Go for agents. It connects to an
+cdp is a lightweight browser CLI written in Go for agents. It connects to an
 existing Chromium browser through the Chrome DevTools Protocol (CDP) and provides
 small, composable operations for observing and acting. Agents can use it to run
 workflows, diagnose failures, and build reusable helpers through the shell, with
@@ -31,7 +31,7 @@ Examples describe the implemented interface; example target IDs are placeholders
 ### 2.1 The agent learns; the CLI stays understandable
 
 Self-healing means observing, acting, checking the effect, observing again when
-expectations are not met, and adjusting the workflow. cdpsh provides the mechanics.
+expectations are not met, and adjusting the workflow. cdp provides the mechanics.
 The agent interprets the page and chooses how to repair the workflow.
 
 The CLI may wait for technical readiness within a time limit and restore a
@@ -64,9 +64,9 @@ descriptions, and result fields. A skill adds workflows and examples; it must no
 contain hidden prerequisites for using the CLI. Website knowledge and repaired
 workflows are stored as reviewable shell helpers or skills.
 
-cdpsh does not automatically modify its installed implementation or skills.
+cdp does not automatically modify its installed implementation or skills.
 The agent can develop and version its own helpers in its workspace.
-The optional cdpsh skill document will be created after v0.1.
+The optional cdp skill document will be created after v0.1.
 
 ### 2.5 Token efficiency is a product contract
 
@@ -93,7 +93,7 @@ where possible.
 ```text
 Agent / Shell / optional skills
             |
-     short-lived cdpsh CLI
+     short-lived cdp CLI
             | local IPC
      long-lived controller
             | persistent CDP / sessions / events
@@ -117,7 +117,7 @@ A custom transport is planned only if a specific gap is demonstrated.
 Proposal for local IPC: a Unix-domain socket on Linux/macOS and a named pipe on
 Windows, accessible to the user running the process. The controller is not a
 public HTTP service. Remote browsers are connected through their CDP endpoints;
-cdpsh does not provide browser hosting.
+cdp does not provide browser hosting.
 
 ## 5. Browsers, contexts, and tabs
 
@@ -129,7 +129,7 @@ cdpsh does not provide browser hosting.
 - Browser and context selection use the flag first, then the environment variable,
   then the default. Proposal: `CDPSH_BROWSER`, `CDPSH_CONTEXT`; both default to `default`.
 - Without a selected tab, tab-specific commands return `NO_TAB`. If a tab is lost,
-  cdpsh does not automatically select an unrelated tab.
+  cdp does not automatically select an unrelated tab.
 
 The controller resolves the target tab when accepting a request and fixes it for
 that request. A concurrent context change must not redirect the action.
@@ -146,8 +146,8 @@ visibly activating it in the browser are separate operations.
 General form:
 
 ```text
-cdpsh [--browser NAME] [--context NAME] [--tab ID] COMMAND [ARGUMENTS]
-      [--timeout DURATION] [--format json|text]
+cdp [--browser NAME] [--context NAME] [--tab ID] COMMAND [ARGUMENTS]
+    [--timeout DURATION] [--format json|text]
 ```
 
 | Command | Contract |
@@ -172,7 +172,7 @@ cdpsh [--browser NAME] [--context NAME] [--tab ID] COMMAND [ARGUMENTS]
 | `wait CONDITION` | Wait for an explicit condition until the timeout |
 | `screenshot [--out PATH]` | Save the viewport to a file; return its path and metadata |
 | `eval --expression JS` / `eval --file PATH` | Execute JavaScript in the selected frame |
-| `cdp call METHOD --params-file PATH` | Execute a raw CDP method |
+| `call METHOD --params-file PATH` | Execute a raw CDP method |
 | `help [COMMAND]` | Concise overview or focused command help |
 | `schema COMMAND` | Describe arguments, results, and errors in machine-readable form |
 
@@ -305,12 +305,12 @@ complete action parameters.
 A typical agent workflow:
 
 ```sh
-cdpsh connect --endpoint http://127.0.0.1:9222
-cdpsh tab new https://example.com/login
-cdpsh observe
-cdpsh fill --ref o7:e1 --text-file email.txt
-cdpsh click --ref o7:e3
-cdpsh observe
+cdp connect --endpoint http://127.0.0.1:9222
+cdp tab new https://example.com/login
+cdp observe
+cdp fill --ref o7:e1 --text-file email.txt
+cdp click --ref o7:e3
+cdp observe
 ```
 
 The references in this example are placeholders from the preceding observation.
@@ -321,7 +321,7 @@ preconditions and postconditions.
 On `STALE_REF`, the agent observes again and chooses based on current data.
 On `effect:possible`, it first checks the effect before repeating the same action.
 Bounded reconnects to the same endpoint are allowed; references become invalid
-afterward. cdpsh does not open a replacement browser or replay mutating requests.
+afterward. cdp does not open a replacement browser or replay mutating requests.
 After a controller restart, no action is guaranteed to be pending or completed;
 `status` reports a new epoch.
 
@@ -333,7 +333,7 @@ It is not a transaction and has no rollback.
 
 ## 11. Operation and extensibility
 
-cdpsh should work on Linux, macOS, and Windows. Browser endpoints are configured
+cdp should work on Linux, macOS, and Windows. Browser endpoints are configured
 explicitly; unavailable remote debugging produces a concrete diagnostic.
 An open CDP connection provides broad browser access. Logical contexts are not a
 security boundary; local IPC and configuration files belong to the user.
@@ -401,7 +401,7 @@ screenshots may require an explicit `tab activate ID`, as reported by a timeout 
   a thin harness and reusable helpers that agents extend themselves.
 - [Browser Harness workflow](https://github.com/browser-use/browser-harness/blob/main/SKILL.md):
   a reference for accessibility-based observation, coordinate actions, and raw CDP.
-  cdpsh defines its CLI and context management independently.
+  cdp defines its CLI and context management independently.
 - [chromedp/cdproto](https://github.com/chromedp/cdproto): generated Go commands,
   types, and events; the preferred foundation for typed internal CDP calls.
 - [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/):
