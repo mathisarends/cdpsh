@@ -65,7 +65,7 @@ func Definitions() map[string]Definition {
 		"back":            {"Navigate back in history", "back [--state domcontentloaded|load]", flags(), 0, 0, "state, effect"},
 		"forward":         {"Navigate forward in history", "forward [--state domcontentloaded|load]", flags(), 0, 0, "state, effect"},
 		"reload":          {"Reload and wait for the new document", "reload [--state domcontentloaded|load]", flags(), 0, 0, "state, effect"},
-		"info":            {"Read URL, title, document readiness", "info", flags(), 0, 0, "url, title, state"},
+		"info":            {"Read URL, title, document readiness", "info", flags(), 0, 0, "url, title, state, truncated"},
 		"observe":         {"Bounded accessibility/DOM observation with fresh context-local references", "observe [--scope viewport|page] [--role ROLE] [--name NAME] [--limit N] [--max-bytes N]", flags("role", "Exact accessibility role filter", "name", "Exact accessible name filter", "limit", "Element limit; default 60, maximum 500", "max-bytes", "Serialized response budget; default 12288, range 2048..65536"), 0, 0, "observation, url, title, elements, text, frames, truncated, next"},
 		"click":           {"Hit-test then dispatch a click; verify task success separately", "click TARGET | click --x X --y Y", flags("x", "CSS viewport X", "y", "CSS viewport Y"), 0, 1, "effect"},
 		"fill":            {"Replace an input/textarea value using native input and verify it; never echoes text", "fill TARGET (--text TEXT | --text-file PATH)", flags("text", "Replacement text", "text-file", "UTF-8 file or - for stdin"), 0, 1, "effect, verified"},

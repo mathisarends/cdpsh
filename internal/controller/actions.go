@@ -27,8 +27,10 @@ func (c *Controller) execute(ctx context.Context, t *tab, r protocol.Request) (a
 		}
 		var out map[string]any
 		_ = json.Unmarshal(v, &out)
-		out["url"] = clip(out["url"].(string), 2048)
-		out["title"] = clip(out["title"].(string), 256)
+		url, title := out["url"].(string), out["title"].(string)
+		out["url"] = clip(url, 2048)
+		out["title"] = clip(title, 256)
+		out["truncated"] = out["url"] != url || out["title"] != title
 		return out, nil
 	case "observe":
 		return c.observe(ctx, t, r)
@@ -106,6 +108,9 @@ func (t *tab) actionable(ctx context.Context, r protocol.Request) (runtime.Remot
 	return id, l, nil
 }
 func (c *Controller) click(ctx context.Context, t *tab, r protocol.Request) (any, error) {
+	if _, err := t.checkFrame(ctx, r); err != nil {
+		return nil, err
+	}
 	var x, y float64
 	if s, ok := r.Flags["x"]; ok {
 		x, _ = strconv.ParseFloat(s, 64)
@@ -473,6 +478,9 @@ func (c *Controller) wait(ctx context.Context, t *tab, r protocol.Request) (any,
 	}
 }
 func (t *tab) condition(ctx context.Context, r protocol.Request) (any, error) {
+	if _, err := t.checkFrame(ctx, r); err != nil {
+		return nil, err
+	}
 	if url, ok := r.Flags["url"]; ok {
 		v, err := t.evaluate(ctx, `location.href`)
 		if err != nil {

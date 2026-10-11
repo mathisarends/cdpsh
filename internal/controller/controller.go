@@ -449,6 +449,7 @@ func (c *Controller) browserCommand(ctx context.Context, b *browser, r protocol.
 		limit := intFlag(r, "limit", 60)
 		index := 0
 		truncated := false
+		more := false
 		for _, v := range tabs {
 			if v.Type == "page" {
 				index++
@@ -457,19 +458,24 @@ func (c *Controller) browserCommand(ctx context.Context, b *browser, r protocol.
 				}
 				if len(out) >= limit {
 					truncated = true
+					more = true
 					break
 				}
 				item := map[string]any{"id": v.TargetID, "title": clip(v.Title, 256), "url": clip(v.URL, 2048)}
+				if item["title"] != v.Title || item["url"] != v.URL {
+					truncated = true
+				}
 				candidate := append(out, item)
 				if len(protocol.Encode(protocol.Success("", map[string]any{"tabs": candidate}))) > protocol.OutputBudget-256 {
 					truncated = true
+					more = true
 					break
 				}
 				out = candidate
 			}
 		}
 		result := map[string]any{"tabs": out, "truncated": truncated}
-		if truncated {
+		if more {
 			result["next"] = fmt.Sprintf("tabs --offset %d", offset+len(out))
 		}
 		return result, nil

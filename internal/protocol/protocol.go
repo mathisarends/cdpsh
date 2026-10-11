@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"unicode/utf8"
 )
 
 const Version = "0.1.0"
@@ -38,8 +39,19 @@ type Error struct {
 	Details any    `json:"details,omitempty"`
 }
 
-func (e *Error) Error() string         { return e.Message }
-func Fail(code, message string) *Error { return &Error{Code: code, Message: message, Effect: "none"} }
+func (e *Error) Error() string { return e.Message }
+func Fail(code, message string) *Error {
+	e := &Error{Code: code, Message: message, Effect: "none"}
+	if len(message) > 1024 {
+		end := 1021
+		for end > 0 && !utf8.RuneStart(message[end]) {
+			end--
+		}
+		e.Message = message[:end] + "…"
+		e.Details = map[string]any{"messageTruncated": true}
+	}
+	return e
+}
 func Effect(err error, effect string) error {
 	var e *Error
 	if errors.As(err, &e) {

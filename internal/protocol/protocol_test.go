@@ -2,7 +2,9 @@ package protocol
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestEffectsAndExitCodes(t *testing.T) {
@@ -23,5 +25,15 @@ func TestEffectsAndExitCodes(t *testing.T) {
 	_ = Effect(e, "possible")
 	if e.Effect != "none" {
 		t.Fatal("Effect mutated a shared error")
+	}
+}
+
+func TestErrorMessageBudget(t *testing.T) {
+	e := Fail("PROTOCOL_ERROR", strings.Repeat("🙂", 1000))
+	if len(e.Message) > 1024 || !utf8.ValidString(e.Message) || e.Details == nil {
+		t.Fatalf("unbounded error: %+v", e)
+	}
+	if e.Code != "PROTOCOL_ERROR" || e.Effect != "none" {
+		t.Fatal("essential fields changed")
 	}
 }
