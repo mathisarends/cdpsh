@@ -33,7 +33,7 @@ func Key(home string) string {
 func Call(ctx context.Context, home string, req protocol.Request, start bool) protocol.Response {
 	conn, err := dial(ctx, home)
 	if err != nil && start {
-		if err = os.MkdirAll(home, 0700); err != nil {
+		if e := os.MkdirAll(home, 0700); e != nil {
 			return protocol.Failure("", protocol.Fail("CONTROLLER_ERROR", "Cannot create controller directory"))
 		}
 		exe, e := os.Executable()

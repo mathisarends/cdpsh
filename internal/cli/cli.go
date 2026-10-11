@@ -71,7 +71,7 @@ func Definitions() map[string]Definition {
 		"fill":            {"Replace an input/textarea value using native input and verify it; never echoes text", "fill TARGET (--text TEXT | --text-file PATH)", flags("text", "Replacement text", "text-file", "UTF-8 file or - for stdin"), 0, 1, "effect, verified"},
 		"type":            {"Insert text at the current focus; use press for keyboard events", "type (--text TEXT | --text-file PATH)", flags("text", "Text to insert", "text-file", "UTF-8 file or - for stdin"), 0, 0, "effect"},
 		"press":           {"Send one key or modifier combination; best-effort release on failure", "press KEY", flags(), 1, 1, "effect"},
-		"scroll":          {"Dispatch a wheel event in a target or the viewport", "scroll --dy PIXELS [--dx PIXELS] [TARGET]", flags("dy", "Vertical CSS pixel delta", "dx", "Horizontal CSS pixel delta"), 0, 1, "effect"},
+		"scroll":          {"Scroll a target area or the viewport by CSS pixels", "scroll --dy PIXELS [--dx PIXELS] [TARGET]", flags("dy", "Vertical CSS pixel delta", "dx", "Horizontal CSS pixel delta"), 0, 1, "effect"},
 		"wait":            {"Poll an explicit condition while allowing later tab actions", "wait --url URL | wait --state STATE [TARGET]", flags("url", "Exact URL to wait for"), 0, 1, "satisfied"},
 		"screenshot":      {"Save a viewport PNG to a file; never emits Base64", "screenshot [--out PATH] [--overwrite]", map[string]Flag{"out": stringFlag("Absolute or caller-relative file path"), "overwrite": {Type: "boolean", Description: "Explicitly replace an existing output file"}}, 0, 0, "path, bytes, type, width, height"},
 		"eval":            {"Evaluate JavaScript; exceptions fail, large values become JSON files", "eval (--expression JS | --file PATH)", flags("expression", "JavaScript expression, promises awaited", "file", "UTF-8 expression file or - for stdin"), 0, 0, "JSON value or {file:{path,bytes,type}}"},
@@ -412,7 +412,7 @@ func help(command string, schema bool) protocol.Response {
 func Run(args []string, in io.Reader, out, stderr io.Writer) int {
 	if len(args) == 2 && args[0] == "_serve" {
 		if err := controller.Serve(args[1]); err != nil {
-			fmt.Fprintln(stderr, err)
+			_, _ = fmt.Fprintln(stderr, err)
 			return 1
 		}
 		return 0
@@ -445,16 +445,19 @@ func Run(args []string, in io.Reader, out, stderr io.Writer) int {
 		}
 	}
 	if format == "text" {
-		renderText(out, response)
+		err = renderText(out, response)
 	} else {
-		_, _ = fmt.Fprintln(out, string(protocol.Encode(response)))
+		_, err = fmt.Fprintln(out, string(protocol.Encode(response)))
+	}
+	if err != nil {
+		return 1
 	}
 	return response.ExitCode()
 }
-func renderText(out io.Writer, r protocol.Response) {
+func renderText(out io.Writer, r protocol.Response) error {
 	if !r.OK {
-		fmt.Fprintf(out, "%s: %s (effect=%s)\n", r.Error.Code, r.Error.Message, r.Error.Effect)
-		return
+		_, err := fmt.Fprintf(out, "%s: %s (effect=%s)\n", r.Error.Code, r.Error.Message, r.Error.Effect)
+		return err
 	}
 	b, _ := json.Marshal(r.Result)
 	var obs struct {
@@ -466,19 +469,22 @@ func renderText(out io.Writer, r protocol.Response) {
 	}
 	_ = json.Unmarshal(b, &obs)
 	if obs.Observation != "" {
-		fmt.Fprintf(out, "tab=%s observation=%s title=%q\n", r.Tab, obs.Observation, obs.Title)
+		var text strings.Builder
+		fmt.Fprintf(&text, "tab=%s observation=%s title=%q\n", r.Tab, obs.Observation, obs.Title)
 		for _, e := range obs.Elements {
-			fmt.Fprintf(out, "%s %s %q\n", e.Ref, e.Role, e.Name)
+			fmt.Fprintf(&text, "%s %s %q\n", e.Ref, e.Role, e.Name)
 		}
 		if obs.Text != "" {
-			fmt.Fprintln(out, obs.Text)
+			fmt.Fprintln(&text, obs.Text)
 		}
 		if obs.Truncated {
-			fmt.Fprintln(out, "[truncated; narrow filters or increase limits]")
+			fmt.Fprintln(&text, "[truncated; narrow filters or increase limits]")
 		}
-		return
+		_, err := io.WriteString(out, text.String())
+		return err
 	}
-	fmt.Fprintln(out, string(b))
+	_, err := fmt.Fprintln(out, string(b))
+	return err
 }
 
 type elementText struct{ Ref, Role, Name string }

@@ -242,26 +242,35 @@ func (t *tab) press(ctx context.Context, chord string) error {
 	return nil
 }
 func (c *Controller) scroll(ctx context.Context, t *tab, r protocol.Request) (any, error) {
-	x, y := 0.0, 0.0
-	if r.Flags["ref"] != "" || r.Flags["css"] != "" || r.Flags["role"] != "" {
-		_, l, err := t.actionable(ctx, r)
-		if err != nil {
-			return nil, err
-		}
-		x, y = l.X, l.Y
-	} else {
-		v, err := t.evaluate(ctx, `[innerWidth/2,innerHeight/2]`)
-		if err != nil {
-			return nil, err
-		}
-		var xy []float64
-		_ = json.Unmarshal(v, &xy)
-		x, y = xy[0], xy[1]
+	if _, err := t.checkFrame(ctx, r); err != nil {
+		return nil, err
 	}
 	dx, _ := strconv.ParseFloat(r.Flags["dx"], 64)
 	dy, _ := strconv.ParseFloat(r.Flags["dy"], 64)
-	if err := t.call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy}, nil); err != nil {
-		return nil, protocol.Effect(err, "possible")
+	if r.Flags["ref"] != "" || r.Flags["css"] != "" || r.Flags["role"] != "" {
+		id, _, err := t.actionable(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		_, err = t.function(ctx, id, `function(dx,dy){
+ let e=this;
+ while(e && e!==document.documentElement){
+   const s=getComputedStyle(e);
+   if((dy && e.scrollHeight>e.clientHeight && /auto|scroll/.test(s.overflowY)) || (dx && e.scrollWidth>e.clientWidth && /auto|scroll/.test(s.overflowX)))break;
+   e=e.parentElement||e.getRootNode().host;
+ }
+ if(!e||e===document.documentElement)window.scrollBy({left:dx,top:dy,behavior:'instant'});
+ else e.scrollBy({left:dx,top:dy,behavior:'instant'});
+ return true;
+}`, dx, dy)
+		if err != nil {
+			return nil, protocol.Effect(err, "possible")
+		}
+	} else {
+		params, _ := json.Marshal(map[string]any{"left": dx, "top": dy, "behavior": "instant"})
+		if _, err := t.evaluate(ctx, "window.scrollBy("+string(params)+");true"); err != nil {
+			return nil, protocol.Effect(err, "possible")
+		}
 	}
 	return map[string]any{"effect": "confirmed"}, nil
 }
@@ -429,6 +438,11 @@ func (c *Controller) navigate(ctx context.Context, t *tab, r protocol.Request) (
 			}
 		} else if ctx.Err() != nil {
 			return nil, protocol.Effect(ctx.Err(), "possible")
+		} else {
+			var pe *protocol.Error
+			if errors.As(err, &pe) && (pe.Code == "CONNECTION_LOST" || pe.Code == "TAB_CLOSED") {
+				return nil, protocol.Effect(err, "possible")
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -482,9 +496,9 @@ func (t *tab) condition(ctx context.Context, r protocol.Request) (any, error) {
 	}
 	switch state {
 	case "visible":
-		return l.Connected && l.Visible && l.Viewport, nil
+		return l.Connected && l.Visible, nil
 	case "hidden":
-		return !l.Connected || !l.Visible || !l.Viewport, nil
+		return !l.Connected || !l.Visible, nil
 	case "enabled":
 		return l.Connected && !l.Disabled, nil
 	}

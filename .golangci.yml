@@ -1,0 +1,18 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - errorlint
+    - unconvert
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (net.Conn).Close
+        - (net.Listener).Close
+        - (*os.File).Close
+        - (*time.Timer).Stop
+        - (net.Conn).SetDeadline
+formatters:
+  enable:
+    - gofmt

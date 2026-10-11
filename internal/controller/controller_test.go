@@ -3,6 +3,8 @@ package controller
 import (
 	"cdpsh/internal/protocol"
 	"context"
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -33,11 +35,25 @@ func TestArtifactsDoNotOverwriteAndLargeValuesAreLossless(t *testing.T) {
 	}
 	file := v.(map[string]any)["file"].(map[string]any)
 	path := file["path"].(string)
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != large {
+		t.Fatal("artifact content changed")
+	}
 	if _, err = c.writeFile(path, []byte("replacement"), false); err == nil {
 		t.Fatal("overwrote file")
 	}
 	if _, err = c.writeFile(path, []byte("replacement"), true); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAXIgnoresFutureChromeProperties(t *testing.T) {
+	var node axNode
+	if err := json.Unmarshal([]byte(`{"ignored":false,"backendDOMNodeId":12,"role":{"value":"button","type":"futureType"},"name":{"value":"Send"},"properties":[{"name":"uninteresting","value":{"value":true}}],"futureField":42}`), &node); err != nil {
+		t.Fatal(err)
+	}
+	if !interactive(node) || axString(node.Name) != "Send" {
+		t.Fatal("new AX property broke observation")
 	}
 }
 func TestClippingPreservesUTF8AndBudgets(t *testing.T) {

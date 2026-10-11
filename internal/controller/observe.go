@@ -78,7 +78,31 @@ func intFlag(r protocol.Request, name string, def int) int {
 	}
 	return def
 }
-func axString(v *accessibility.Value) string {
+
+// Decode only the AX fields we use. cdproto's generated enum unmarshallers
+// reject new Chrome properties, even if those properties are irrelevant here.
+type axValue struct {
+	Value json.RawMessage `json:"value"`
+}
+type axNode struct {
+	Ignored          bool              `json:"ignored"`
+	BackendDOMNodeID cdp.BackendNodeID `json:"backendDOMNodeId"`
+	Role             *axValue          `json:"role"`
+	Name             *axValue          `json:"name"`
+	Properties       []struct {
+		Name  string   `json:"name"`
+		Value *axValue `json:"value"`
+	} `json:"properties"`
+}
+
+func (t *tab) ax(ctx context.Context) ([]axNode, error) {
+	var result struct {
+		Nodes []axNode `json:"nodes"`
+	}
+	err := t.call(ctx, accessibility.CommandGetFullAXTree, nil, &result)
+	return result.Nodes, err
+}
+func axString(v *axValue) string {
 	if v == nil {
 		return ""
 	}
@@ -86,7 +110,7 @@ func axString(v *accessibility.Value) string {
 	_ = json.Unmarshal(v.Value, &s)
 	return s
 }
-func interactive(n *accessibility.Node) bool {
+func interactive(n axNode) bool {
 	switch axString(n.Role) {
 	case "button", "link", "textbox", "searchbox", "checkbox", "radio", "combobox", "listbox", "option", "menuitem", "menuitemcheckbox", "menuitemradio", "switch", "slider", "spinbutton", "tab", "treeitem":
 		return true
@@ -251,7 +275,7 @@ func (c *Controller) observe(ctx context.Context, t *tab, r protocol.Request) (a
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := accessibility.GetFullAXTree().Do(t.typed(ctx))
+	nodes, err := t.ax(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -419,7 +443,7 @@ func (t *tab) resolve(ctx context.Context, r protocol.Request) (runtime.RemoteOb
 			}
 		}
 	} else {
-		nodes, err := accessibility.GetFullAXTree().Do(t.typed(ctx))
+		nodes, err := t.ax(ctx)
 		if err != nil {
 			return "", err
 		}
