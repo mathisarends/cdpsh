@@ -44,7 +44,7 @@ func (h *harness) run(stdin string, args ...string) protocol.Response {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, h.exe, args...)
 	hide(cmd)
-	cmd.Env = append(os.Environ(), "CDPSH_HOME="+h.home)
+	cmd.Env = append(os.Environ(), "CDPSH_HOME="+h.home, "GORACE=atexit_sleep_ms=0")
 	cmd.Stdin = strings.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -107,7 +107,7 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 	if err := os.Mkdir(profile, 0700); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(path, "--headless=new", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--user-data-dir="+profile, "--no-first-run", "--no-default-browser-check", "about:blank")
+	cmd := exec.Command(path, "--headless=new", "--disable-gpu", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--user-data-dir="+profile, "--no-first-run", "--no-default-browser-check", "about:blank")
 	hide(cmd)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -133,7 +133,11 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		exe += ".exe"
 	}
-	build := exec.Command("go", "build", "-o", exe, "../cmd/cdpsh")
+	buildArgs := []string{"build", "-o", exe, "../cmd/cdpsh"}
+	if os.Getenv("CDPSH_TEST_RACE") == "1" {
+		buildArgs = []string{"build", "-race", "-o", exe, "../cmd/cdpsh"}
+	}
+	build := exec.Command("go", buildArgs...)
 	hide(build)
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build CLI: %v\n%s", err, out)
@@ -227,6 +231,7 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 		t.Fatal("large result lost data")
 	}
 	shot := filepath.Join(dir, "viewport.png")
+	ok(t, h.call("tab", "activate", a))
 	ok(t, alpha("screenshot", "--out", shot))
 	code(t, alpha("screenshot", "--out", shot), "EXECUTION_ERROR")
 	ok(t, alpha("screenshot", "--out", shot, "--overwrite"))
@@ -276,7 +281,7 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 	if ok(t, alpha("status"))["selectedTab"] != a {
 		t.Fatal("explicit tab override persisted")
 	}
-	navRef := ref(t, alpha("observe"), "Email")
+	navRef := ref(t, alpha("observe", "--scope", "page"), "Email")
 	ok(t, alpha("goto", srv.URL+"/second"))
 	code(t, alpha("click", "--ref", navRef), "STALE_REF")
 	ok(t, alpha("back"))
@@ -287,6 +292,7 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 	if timed.Error.Effect != "possible" {
 		t.Fatal("navigation timeout lost possible effect")
 	}
+	ok(t, alpha("wait", "--url", srv.URL+"/slow", "--timeout", "3s"))
 	ok(t, alpha("wait", "--state", "load", "--timeout", "3s"))
 	ok(t, alpha("eval", "--expression", `document.body.innerHTML=Array.from({length:300},(_,i)=>'<button>'+('Long name '+i+' ').repeat(25)+'</button>').join('')`))
 	bounded := alpha("observe", "--scope", "page", "--limit", "300", "--max-bytes", "2048")

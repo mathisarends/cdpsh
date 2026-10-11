@@ -408,6 +408,7 @@ func (t *tab) resolve(ctx context.Context, r protocol.Request) (runtime.RemoteOb
 		return id, nil
 	}
 	var backends []cdp.BackendNodeID
+	candidates := []map[string]string{}
 	if css, ok := r.Flags["css"]; ok {
 		quoted, _ := json.Marshal(css)
 		var res struct {
@@ -440,6 +441,15 @@ func (t *tab) resolve(ctx context.Context, r protocol.Request) (runtime.RemoteOb
 			node, err := dom.DescribeNode().WithObjectID(p.Value.ObjectID).Do(t.typed(ctx))
 			if err == nil {
 				backends = append(backends, node.BackendNodeID)
+				if len(candidates) < 5 {
+					candidate := map[string]string{"tag": clip(node.LocalName, 80)}
+					for i := 0; i+1 < len(node.Attributes); i += 2 {
+						if node.Attributes[i] == "id" {
+							candidate["id"] = clip(node.Attributes[i+1], 100)
+						}
+					}
+					candidates = append(candidates, candidate)
+				}
 			}
 		}
 	} else {
@@ -451,6 +461,9 @@ func (t *tab) resolve(ctx context.Context, r protocol.Request) (runtime.RemoteOb
 			if !n.Ignored && n.BackendDOMNodeID != 0 && axString(n.Role) == r.Flags["role"] {
 				if name, ok := r.Flags["name"]; !ok || name == axString(n.Name) {
 					backends = append(backends, n.BackendDOMNodeID)
+					if len(candidates) < 5 {
+						candidates = append(candidates, map[string]string{"role": clip(axString(n.Role), 80), "name": clip(axString(n.Name), 200)})
+					}
 				}
 			}
 		}
@@ -459,7 +472,7 @@ func (t *tab) resolve(ctx context.Context, r protocol.Request) (runtime.RemoteOb
 		return "", protocol.Fail("TARGET_NOT_FOUND", "Target did not match an element")
 	}
 	if len(backends) > 1 {
-		return "", &protocol.Error{Code: "AMBIGUOUS_TARGET", Message: "Target matched multiple elements; narrow the selector or use a fresh reference", Effect: "none", Details: map[string]any{"count": len(backends), "next": "observe"}}
+		return "", &protocol.Error{Code: "AMBIGUOUS_TARGET", Message: "Target matched multiple elements; narrow the selector or use a fresh reference", Effect: "none", Next: "observe", Details: map[string]any{"count": len(backends), "candidates": candidates, "truncated": len(backends) > len(candidates)}}
 	}
 	return t.object(ctx, backends[0])
 }

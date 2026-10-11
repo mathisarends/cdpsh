@@ -5,8 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,7 +40,7 @@ type browser struct {
 type tab struct {
 	browser      *browser
 	id           string
-	session      string // Accessed only by the tab worker.
+	session      string // Guarded by mu; shared with the browser event reader.
 	mu           sync.Mutex
 	dead         bool
 	observations map[string]*observation
@@ -163,6 +166,12 @@ func (b *browser) getTab(id string) *tab {
 	return t
 }
 func (t *tab) enqueue(j *job) {
+	select {
+	case <-t.browser.client.Done:
+		j.done <- outcome{err: protocol.Fail("CONNECTION_LOST", "Browser connection lost; reconnect before retrying")}
+		return
+	default:
+	}
 	t.mu.Lock()
 	t.queue = append(t.queue, j)
 	t.mu.Unlock()
@@ -225,6 +234,10 @@ func (t *tab) attach(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		var pe *protocol.Error
+		if errors.As(err, &pe) && pe.Code == "CONNECTION_LOST" {
+			return err
+		}
 		return protocol.Fail("TAB_CLOSED", "Target is unavailable; list tabs and explicitly select one")
 	}
 	t.mu.Lock()
@@ -232,6 +245,12 @@ func (t *tab) attach(ctx context.Context) error {
 	t.mu.Unlock()
 	for _, method := range []string{"Page.enable", "Runtime.enable", "DOM.enable", "Accessibility.enable"} {
 		if err := t.call(ctx, method, nil, nil); err != nil {
+			cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
+			_ = t.browser.client.Call(cleanup, "", "Target.detachFromTarget", map[string]any{"sessionId": res.SessionID}, nil)
+			cancel()
+			t.mu.Lock()
+			t.session = ""
+			t.mu.Unlock()
 			return err
 		}
 	}
@@ -265,8 +284,8 @@ func await(ctx context.Context, j *job) (any, error) {
 		return nil, ctx.Err()
 	}
 }
-func (t *tab) do(ctx context.Context, fn func(context.Context) (any, error)) (any, error) {
-	j := &job{ctx: ctx, run: fn, done: make(chan outcome, 1)}
+func (t *tab) do(ctx context.Context, fn func(context.Context) (any, error), mayMutate bool) (any, error) {
+	j := &job{ctx: ctx, run: fn, done: make(chan outcome, 1), mayMutate: mayMutate}
 	t.enqueue(j)
 	return await(ctx, j)
 }
@@ -354,6 +373,15 @@ func (c *Controller) Handle(ctx context.Context, r protocol.Request) protocol.Re
 		result, err = c.wait(ctx, t, r)
 	}
 	if err != nil {
+		if r.Command == "screenshot" {
+			pe := protocol.Failure(id, err).Error
+			if pe.Code == "TIMEOUT" {
+				copy := *pe
+				copy.Next = "tab activate " + id
+				copy.Message = "Screenshot timed out; Chromium may need explicit tab activation"
+				err = &copy
+			}
+		}
 		return protocol.Failure(id, err)
 	}
 	return protocol.Success(id, result)
@@ -361,6 +389,9 @@ func (c *Controller) Handle(ctx context.Context, r protocol.Request) protocol.Re
 func (c *Controller) connection(ctx context.Context, r protocol.Request) protocol.Response {
 	c.manage.Lock()
 	defer c.manage.Unlock()
+	if ctx.Err() != nil {
+		return protocol.Failure("", ctx.Err())
+	}
 	if r.Command == "disconnect" {
 		c.mu.Lock()
 		b := c.browsers[r.Browser]
@@ -412,13 +443,36 @@ func (c *Controller) browserCommand(ctx context.Context, b *browser, r protocol.
 		if err != nil {
 			return nil, err
 		}
+		sort.Slice(tabs, func(i, j int) bool { return tabs[i].TargetID < tabs[j].TargetID })
 		out := []map[string]any{}
+		offset := intFlag(r, "offset", 0)
+		limit := intFlag(r, "limit", 60)
+		index := 0
+		truncated := false
 		for _, v := range tabs {
 			if v.Type == "page" {
-				out = append(out, map[string]any{"id": v.TargetID, "title": clip(v.Title, 256), "url": clip(v.URL, 2048)})
+				index++
+				if index <= offset {
+					continue
+				}
+				if len(out) >= limit {
+					truncated = true
+					break
+				}
+				item := map[string]any{"id": v.TargetID, "title": clip(v.Title, 256), "url": clip(v.URL, 2048)}
+				candidate := append(out, item)
+				if len(protocol.Encode(protocol.Success("", map[string]any{"tabs": candidate}))) > protocol.OutputBudget-256 {
+					truncated = true
+					break
+				}
+				out = candidate
 			}
 		}
-		return map[string]any{"tabs": out}, nil
+		result := map[string]any{"tabs": out, "truncated": truncated}
+		if truncated {
+			result["next"] = fmt.Sprintf("tabs --offset %d", offset+len(out))
+		}
+		return result, nil
 	}
 	if r.Command == "tab new" {
 		url := "about:blank"
@@ -441,9 +495,16 @@ func (c *Controller) browserCommand(ctx context.Context, b *browser, r protocol.
 	}
 	id := r.Args[0]
 	if r.Command == "tab use" {
-		var result any
+		var result struct {
+			TargetInfo struct {
+				Type string `json:"type"`
+			} `json:"targetInfo"`
+		}
 		if err := b.client.Call(ctx, "", "Target.getTargetInfo", map[string]any{"targetId": id}, &result); err != nil {
 			return nil, protocol.Fail("TAB_CLOSED", "Tab ID does not exist")
+		}
+		if result.TargetInfo.Type != "page" {
+			return nil, protocol.Fail("UNSUPPORTED", "Selected target is not a page tab")
 		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -470,5 +531,5 @@ func (c *Controller) browserCommand(ctx context.Context, b *browser, r protocol.
 			t.mu.Unlock()
 		}
 		return map[string]any{"id": id, "effect": "confirmed"}, nil
-	})
+	}, true)
 }

@@ -322,6 +322,11 @@ func (c *Controller) externalize(v json.RawMessage, mime string) (any, error) {
 	return map[string]any{"file": file}, nil
 }
 func (c *Controller) screenshot(ctx context.Context, t *tab, r protocol.Request) (any, error) {
+	if path := r.Flags["out"]; path != "" && r.Flags["overwrite"] != "true" {
+		if _, err := os.Stat(path); err == nil {
+			return nil, protocol.Fail("EXECUTION_ERROR", "Output file already exists; use --overwrite")
+		}
+	}
 	var res struct {
 		Data string `json:"data"`
 	}
@@ -453,7 +458,7 @@ func (c *Controller) navigate(ctx context.Context, t *tab, r protocol.Request) (
 }
 func (c *Controller) wait(ctx context.Context, t *tab, r protocol.Request) (any, error) {
 	for {
-		v, err := t.do(ctx, func(ctx context.Context) (any, error) { defer t.release(ctx); return t.condition(ctx, r) })
+		v, err := t.do(ctx, func(ctx context.Context) (any, error) { defer t.release(ctx); return t.condition(ctx, r) }, false)
 		if err != nil {
 			return nil, err
 		}

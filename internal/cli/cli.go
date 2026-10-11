@@ -56,7 +56,7 @@ func Definitions() map[string]Definition {
 		"disconnect":      {"Disconnect CDP and leave all browser tabs open", "disconnect", flags(), 0, 0, "disconnected"},
 		"status":          {"Controller epoch, connection and selected tab", "status", flags(), 0, 0, "version, epoch, browser, context, connected, selectedTab"},
 		"doctor":          {"Focused controller and CDP diagnostics", "doctor", flags(), 0, 0, "status fields, checks, next"},
-		"tabs":            {"List page targets", "tabs", flags(), 0, 0, "tabs: [{id,title,url}]"},
+		"tabs":            {"List page targets with bounded output", "tabs [--limit N] [--offset N]", flags("limit", "Tab limit; default 60, maximum 500", "offset", "Skip this many page tabs; default 0"), 0, 0, "tabs: [{id,title,url}], truncated, next"},
 		"tab new":         {"Create and select a tab in this context", "tab new [URL]", flags(), 0, 1, "id, selected"},
 		"tab use":         {"Select a tab without visibly activating it", "tab use ID", flags(), 1, 1, "id, selected"},
 		"tab activate":    {"Visibly activate an explicitly named tab", "tab activate ID", flags(), 1, 1, "id, effect"},
@@ -304,6 +304,12 @@ func parse(args []string) (protocol.Request, string, error) {
 			}
 		}
 	}
+	if has("offset") {
+		n, e := strconv.Atoi(r.Flags["offset"])
+		if e != nil || n < 0 || n > 1000000 {
+			return r, format, protocol.Fail("INVALID_ARGUMENT", "--offset must be an integer in 0..1000000")
+		}
+	}
 	timeout := 10 * time.Second
 	switch r.Command {
 	case "connect", "goto", "back", "forward", "reload":
@@ -440,6 +446,12 @@ func Run(args []string, in io.Reader, out, stderr io.Writer) int {
 				r.Flags["out"] = abs
 			}
 			ctx, cancel := context.WithDeadline(context.Background(), time.UnixMilli(r.Deadline))
+			encoded, e := json.Marshal(r)
+			if e != nil || len(encoded) > protocol.MaxInput {
+				response = protocol.Failure("", protocol.Fail("INVALID_ARGUMENT", "Encoded request exceeds 8 MiB"))
+				cancel()
+				break
+			}
 			response = ipc.Call(ctx, ipc.Home(), r, r.Command == "connect")
 			cancel()
 		}
