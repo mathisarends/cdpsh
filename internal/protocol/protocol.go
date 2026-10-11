@@ -13,7 +13,7 @@ const OutputBudget = 12 << 10
 
 func MayMutate(command string) bool {
 	switch command {
-	case "goto", "back", "forward", "reload", "click", "fill", "type", "press", "scroll", "eval", "cdp call", "tab new", "tab close", "tab activate":
+	case "goto", "back", "forward", "reload", "click", "fill", "type", "press", "scroll", "eval", "call", "tab new", "tab close", "tab activate":
 		return true
 	default:
 		return false

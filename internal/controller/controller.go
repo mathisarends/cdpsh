@@ -341,7 +341,7 @@ func (c *Controller) Handle(ctx context.Context, r protocol.Request) protocol.Re
 		return protocol.Failure("", protocol.Fail("CONNECTION_LOST", "Browser connection lost; use connect to reconnect"))
 	default:
 	}
-	if r.Command == "tabs" || r.Command == "tab new" || r.Command == "tab use" || r.Command == "tab activate" || r.Command == "tab close" || (r.Command == "cdp call" && r.Flags["scope"] == "browser") {
+	if r.Command == "tabs" || r.Command == "tab new" || r.Command == "tab use" || r.Command == "tab activate" || r.Command == "tab close" || (r.Command == "call" && r.Flags["scope"] == "browser") {
 		c.mu.Unlock()
 		result, err := c.browserCommand(ctx, b, r)
 		if err != nil {
@@ -430,7 +430,7 @@ func (c *Controller) connection(ctx context.Context, r protocol.Request) protoco
 	return protocol.Success("", map[string]any{"browser": name, "connected": true, "epoch": c.Epoch})
 }
 func (c *Controller) browserCommand(ctx context.Context, b *browser, r protocol.Request) (any, error) {
-	if r.Command == "cdp call" {
+	if r.Command == "call" {
 		var result json.RawMessage
 		err := b.client.Call(ctx, "", r.Args[0], json.RawMessage(r.Payload), &result)
 		if err != nil {

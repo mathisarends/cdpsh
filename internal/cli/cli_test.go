@@ -11,7 +11,7 @@ import (
 func TestArgumentContracts(t *testing.T) {
 	t.Setenv("CDPSH_BROWSER", "env-browser")
 	t.Setenv("CDPSH_CONTEXT", "env-context")
-	valid := [][]string{{"--browser", "explicit", "click", "--css", "#submit", "--timeout", "2s"}, {"wait", "--css", "#later", "--state", "visible"}, {"wait", "--url", "https://example.com/"}, {"click", "--x", "12.5", "--y", "2"}, {"scroll", "--dy", "-300"}, {"observe", "--scope", "page", "--limit", "100", "--max-bytes", "2048"}, {"cdp", "call", "Future.unknown", "--scope", "browser"}, {"help", "tab", "new"}, {"press", "Ctrl+Shift+A"}, {"fill", "o1:e2", "--text=hello"}}
+	valid := [][]string{{"--browser", "explicit", "click", "--css", "#submit", "--timeout", "2s"}, {"wait", "--css", "#later", "--state", "visible"}, {"wait", "--url", "https://example.com/"}, {"click", "--x", "12.5", "--y", "2"}, {"scroll", "--dy", "-300"}, {"observe", "--scope", "page", "--limit", "100", "--max-bytes", "2048"}, {"call", "Future.unknown", "--scope", "browser"}, {"help", "tab", "new"}, {"press", "Ctrl+Shift+A"}, {"fill", "o1:e2", "--text=hello"}}
 	for _, args := range valid {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			r, _, err := parse(args)
@@ -48,10 +48,10 @@ func TestInputContracts(t *testing.T) {
 		{[]string{"eval", "--expression", "1+1"}, "", "1+1", false},
 		{[]string{"eval"}, "", "", true},
 		{[]string{"type", "--text", "x", "--text-file", "-"}, "", "", true},
-		{[]string{"cdp", "call", "Test.anything"}, "", "{}", false},
-		{[]string{"cdp", "call", "Test.anything", "--params", "null"}, "", "", true},
-		{[]string{"cdp", "call", "Test.anything", "--params", "[]"}, "", "", true},
-		{[]string{"cdp", "call", "Test.anything", "--params-file", "-"}, `{"x":1}`, `{"x":1}`, false},
+		{[]string{"call", "Test.anything"}, "", "{}", false},
+		{[]string{"call", "Test.anything", "--params", "null"}, "", "", true},
+		{[]string{"call", "Test.anything", "--params", "[]"}, "", "", true},
+		{[]string{"call", "Test.anything", "--params-file", "-"}, `{"x":1}`, `{"x":1}`, false},
 	} {
 		r, _, err := parse(test.args)
 		if err != nil {
@@ -67,7 +67,7 @@ func TestInputContracts(t *testing.T) {
 	}
 }
 func TestOneJSONResponseIncludingLocalFailures(t *testing.T) {
-	for _, args := range [][]string{{"click"}, {"eval"}, {"schema", "fill"}, {"help"}, {"--help"}, {"version"}} {
+	for _, args := range [][]string{{"click"}, {"eval"}, {"schema", "fill"}, {"schema", "call"}, {"help"}, {"--help"}, {"version"}} {
 		var out, stderr bytes.Buffer
 		exit := Run(args, strings.NewReader(""), &out, &stderr)
 		var response protocol.Response
@@ -83,6 +83,13 @@ func TestOneJSONResponseIncludingLocalFailures(t *testing.T) {
 		}
 		if exit != response.ExitCode() {
 			t.Fatal("wrong exit code")
+		}
+		if len(args) == 1 && args[0] == "--help" {
+			result, ok := response.Result.(map[string]any)
+			usage, _ := result["usage"].(string)
+			if !ok || !strings.HasPrefix(usage, "cdp ") || result["commands"] == nil {
+				t.Fatal("root --help must show the cdp command overview")
+			}
 		}
 	}
 }

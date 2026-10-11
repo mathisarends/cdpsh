@@ -75,7 +75,7 @@ func Definitions() map[string]Definition {
 		"wait":            {"Poll an explicit condition while allowing later tab actions", "wait --url URL | wait --state STATE [TARGET]", flags("url", "Exact URL to wait for"), 0, 1, "satisfied"},
 		"screenshot":      {"Save a viewport PNG to a file; never emits Base64", "screenshot [--out PATH] [--overwrite]", map[string]Flag{"out": stringFlag("Absolute or caller-relative file path"), "overwrite": {Type: "boolean", Description: "Explicitly replace an existing output file"}}, 0, 0, "path, bytes, type, width, height"},
 		"eval":            {"Evaluate JavaScript; exceptions fail, large values become JSON files", "eval (--expression JS | --file PATH)", flags("expression", "JavaScript expression, promises awaited", "file", "UTF-8 expression file or - for stdin"), 0, 0, "JSON value or {file:{path,bytes,type}}"},
-		"cdp call":        {"Execute any raw CDP method without a pinned method allowlist", "cdp call METHOD [--params JSON | --params-file PATH] [--scope tab|browser]", flags("params", "JSON object parameters", "params-file", "UTF-8 JSON object file or - for stdin"), 1, 1, "Raw JSON result or {file:{path,bytes,type}}"},
+		"call":            {"Execute any raw CDP method without a pinned method allowlist", "call METHOD [--params JSON | --params-file PATH] [--scope tab|browser]", flags("params", "JSON object parameters", "params-file", "UTF-8 JSON object file or - for stdin"), 1, 1, "Raw JSON result or {file:{path,bytes,type}}"},
 		"help":            {"Concise overview or focused command help", "help [COMMAND]", flags(), 0, 2, "commands or command definition"},
 		"schema":          {"Machine-readable command arguments, result and error contract", "schema COMMAND", flags(), 1, 2, "command, flags, globals, constraints, result, errors, exitCodes"},
 		"version":         {"Print the CLI version", "version", flags(), 0, 0, "version"},
@@ -102,9 +102,9 @@ func Definitions() map[string]Definition {
 	d := m["observe"]
 	d.Flags["scope"] = choice("Elements in viewport (default) or entire page", "viewport", "page")
 	m["observe"] = d
-	d = m["cdp call"]
+	d = m["call"]
 	d.Flags["scope"] = choice("CDP session; default tab", "tab", "browser")
-	m["cdp call"] = d
+	m["call"] = d
 	d = m["wait"]
 	d.Flags["state"] = choice("Explicit readiness or target condition", "domcontentloaded", "load", "visible", "hidden", "enabled")
 	m["wait"] = d
@@ -166,7 +166,7 @@ func parse(args []string) (protocol.Request, string, error) {
 	} else {
 		r.Command = position[0]
 		r.Args = position[1:]
-		if r.Command == "tab" || r.Command == "cdp" || r.Command == "controller" {
+		if r.Command == "tab" || r.Command == "controller" {
 			if len(r.Args) == 0 {
 				return r, format, protocol.Fail("INVALID_ARGUMENT", "Missing subcommand")
 			}
@@ -195,7 +195,9 @@ func parse(args []string) (protocol.Request, string, error) {
 		return r, format, protocol.Fail("INVALID_ARGUMENT", "Unknown command; use help")
 	}
 	if r.Flags["help"] == "true" {
-		r.Args = strings.Fields(r.Command)
+		if r.Command != "help" {
+			r.Args = strings.Fields(r.Command)
+		}
 		r.Command = "help"
 		return r, format, nil
 	}
@@ -333,7 +335,7 @@ func input(r *protocol.Request, in io.Reader) error {
 		names = []string{"text", "text-file"}
 	case "eval":
 		names = []string{"expression", "file"}
-	case "cdp call":
+	case "call":
 		names = []string{"params", "params-file"}
 		required = false
 	default:
@@ -377,7 +379,7 @@ func input(r *protocol.Request, in io.Reader) error {
 	if !utf8.ValidString(r.Payload) {
 		return protocol.Fail("INVALID_ARGUMENT", "Input must be UTF-8")
 	}
-	if r.Command == "cdp call" {
+	if r.Command == "call" {
 		var obj map[string]json.RawMessage
 		if json.Unmarshal([]byte(r.Payload), &obj) != nil || obj == nil {
 			return protocol.Fail("INVALID_ARGUMENT", "CDP parameters must be a JSON object")
@@ -400,7 +402,7 @@ func help(command string, schema bool) protocol.Response {
 		for _, name := range names {
 			commands = append(commands, map[string]string{"command": name, "summary": defs[name].Summary})
 		}
-		return protocol.Success("", map[string]any{"version": protocol.Version, "usage": "cdpsh [--browser NAME] [--context NAME] [--tab ID] COMMAND [FLAGS]", "commands": commands, "next": "help COMMAND or schema COMMAND"})
+		return protocol.Success("", map[string]any{"version": protocol.Version, "usage": "cdp [--browser NAME] [--context NAME] [--tab ID] COMMAND [FLAGS]", "commands": commands, "next": "help COMMAND or schema COMMAND"})
 	}
 	d, ok := defs[command]
 	if !ok {

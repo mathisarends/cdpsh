@@ -214,7 +214,7 @@ func (t *tab) checkFrame(ctx context.Context, r protocol.Request) (string, error
 	}
 	main := frames[0].ID
 	if r.Flags["frame"] != "" && r.Flags["frame"] != main {
-		return "", &protocol.Error{Code: "UNSUPPORTED", Message: "High-level commands support the main frame; use raw CDP or viewport coordinates for child frames", Effect: "none", Next: "cdp call"}
+		return "", &protocol.Error{Code: "UNSUPPORTED", Message: "High-level commands support the main frame; use raw CDP or viewport coordinates for child frames", Effect: "none", Next: "call"}
 	}
 	return main, nil
 }

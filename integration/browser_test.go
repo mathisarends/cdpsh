@@ -24,7 +24,7 @@ import (
 	"cdpsh/internal/transport"
 )
 
-const fixture = `<!doctype html><html><head><title>cdpsh fixture</title><style>body{font:16px sans-serif;padding:24px}input,button{display:block;margin:12px}#covered{position:absolute;left:450px;top:60px;width:100px;height:40px}#overlay{position:absolute;left:440px;top:50px;width:140px;height:70px;background:#777;z-index:10}#scroller{height:80px;width:200px;overflow:auto}#long{height:900px}</style></head><body>
+const fixture = `<!doctype html><html><head><title>cdp fixture</title><style>body{font:16px sans-serif;padding:24px}input,button{display:block;margin:12px}#covered{position:absolute;left:450px;top:60px;width:100px;height:40px}#overlay{position:absolute;left:440px;top:50px;width:140px;height:70px;background:#777;z-index:10}#scroller{height:80px;width:200px;overflow:auto}#long{height:900px}</style></head><body>
 <label>Email<input id=email></label><label>Password<input id=password type=password></label>
 <button id=submit onclick="document.querySelector('#result').textContent='Signed in: '+document.querySelector('#email').value">Sign in</button><p id=result></p>
 <button id=covered>Covered</button><div id=overlay></div><button class=duplicate>Duplicate</button><button class=duplicate>Duplicate</button>
@@ -130,13 +130,13 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 	if endpoint == "" {
 		t.Fatal("isolated Chrome did not expose remote debugging")
 	}
-	exe := filepath.Join(dir, "cdpsh")
+	exe := filepath.Join(dir, "cdp")
 	if runtime.GOOS == "windows" {
 		exe += ".exe"
 	}
-	buildArgs := []string{"build", "-o", exe, "../cmd/cdpsh"}
+	buildArgs := []string{"build", "-o", exe, "../cmd/cdp"}
 	if os.Getenv("CDPSH_TEST_RACE") == "1" {
-		buildArgs = []string{"build", "-race", "-o", exe, "../cmd/cdpsh"}
+		buildArgs = []string{"build", "-race", "-o", exe, "../cmd/cdp"}
 	}
 	build := exec.Command("go", buildArgs...)
 	hide(build)
@@ -219,9 +219,9 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 	child := frames[1].(map[string]any)["id"].(string)
 	code(t, alpha("click", "--frame", child, "--css", "button"), "UNSUPPORTED")
 	code(t, alpha("eval", "--expression", "throw new Error('fixture failure')"), "EXECUTION_ERROR")
-	code(t, alpha("cdp", "call", "Future.nonexistent"), "UNSUPPORTED")
-	ok(t, alpha("cdp", "call", "Browser.getVersion", "--scope", "browser"))
-	ok(t, alpha("cdp", "call", "Runtime.evaluate", "--params", `{"expression":"1+2","returnByValue":true}`))
+	code(t, alpha("call", "Future.nonexistent"), "UNSUPPORTED")
+	ok(t, alpha("call", "Browser.getVersion", "--scope", "browser"))
+	ok(t, alpha("call", "Runtime.evaluate", "--params", `{"expression":"1+2","returnByValue":true}`))
 	large := ok(t, alpha("eval", "--expression", `'abc'.repeat(20000)`))["file"].(map[string]any)
 	data, err := os.ReadFile(large["path"].(string))
 	if err != nil {

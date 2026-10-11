@@ -74,7 +74,7 @@ func (c *Controller) execute(ctx context.Context, t *tab, r protocol.Request) (a
 			return nil, protocol.Effect(err, "possible")
 		}
 		return c.externalize(v, "application/json")
-	case "cdp call":
+	case "call":
 		var v json.RawMessage
 		if err := t.call(ctx, r.Args[0], json.RawMessage(r.Payload), &v); err != nil {
 			return nil, protocol.Effect(err, "possible")
