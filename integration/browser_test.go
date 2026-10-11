@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"cdpsh/internal/protocol"
+	"cdpsh/internal/transport"
 )
 
 const fixture = `<!doctype html><html><head><title>cdpsh fixture</title><style>body{font:16px sans-serif;padding:24px}input,button{display:block;margin:12px}#covered{position:absolute;left:450px;top:60px;width:100px;height:40px}#overlay{position:absolute;left:440px;top:50px;width:140px;height:70px;background:#777;z-index:10}#scroller{height:80px;width:200px;overflow:auto}#long{height:900px}</style></head><body>
@@ -112,8 +113,8 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	var endpoint string
+	t.Cleanup(func() { closeBrowser(t, cmd, endpoint) })
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(filepath.Join(profile, "DevToolsActivePort"))
@@ -327,4 +328,34 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 	}
 	ok(t, h.call("doctor"))
 	t.Logf("Blank-profile Chrome acceptance passed; controller epoch %s; screenshot %s", fmt.Sprint(epoch), shot)
+}
+
+// Close the browser through CDP so its children finish writing the temporary
+// profile before testing removes it. Killing only the parent leaves writers alive.
+func closeBrowser(t *testing.T, cmd *exec.Cmd, endpoint string) {
+	t.Helper()
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	if endpoint != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		client, err := transport.Dial(ctx, endpoint, nil)
+		if err == nil {
+			// Chromium may close the connection before replying to Browser.close.
+			_ = client.Call(ctx, "", "Browser.close", nil, nil)
+			client.Close()
+		}
+		cancel()
+	}
+	select {
+	case err := <-exited:
+		if err != nil {
+			t.Errorf("test browser exited unsuccessfully: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			t.Errorf("kill stalled test browser: %v", err)
+		}
+		<-exited
+		t.Error("test browser did not shut down gracefully")
+	}
 }
