@@ -12,8 +12,8 @@ main ""
     *[OBSERVATION_ID:e1] button "Buy"
   region "Product B"
     *[OBSERVATION_ID:e2] button "Buy"
-  |SHADOW(open)| checkout-form
-    |SHADOW(closed)| payment-field
+  |SHADOW(open)| "checkout-form"
+    |SHADOW(closed)| "payment-field"
       *[OBSERVATION_ID:e3] textbox "Email" inputType="email" value="user@example.com"
       *[OBSERVATION_ID:e4] checkbox "Accept terms" checked=false
 ```
@@ -28,8 +28,9 @@ rendered page text. It does not reproduce every DOM ancestor.
 
 Elements expose live values and applicable states: checked (including `mixed`),
 selected, expanded, pressed, focused, readonly, required, disabled, input type,
-placeholder and scroll position. Applicable false values remain explicit. Values
-are bounded and report `valueTruncated`; accessible names remain bounded, so use
+placeholder and scroll position. Checked/selected/expanded/pressed false values
+remain explicit. Values are bounded and report `valueTruncated`; accessible names
+remain bounded, so use
 the reference instead of an exact name selector when a displayed name ends in an
 ellipsis. Password, file, hidden, payment-autocomplete and one-time-code values
 are excluded. The CLI does not redact arbitrary website prose.
@@ -38,6 +39,9 @@ are excluded. The CLI does not redact arbitrary website prose.
 articles, rows and list items. This distinguishes equal labels without exposing
 every anonymous layout wrapper. `shadow` lists the containing author shadow
 boundaries from outermost to innermost, including closed roots and assigned slots.
+Fallback names and context headings use rendered snapshot text, excluding hidden
+DOM text. Host identifiers are quoted in the text view so embedded newlines cannot
+create structural lines.
 
 AX controls remain the primary targets. CDP-reported click listeners and scroll
 containers can also produce references when no interactive AX role exists. These
@@ -48,7 +52,9 @@ not a role/name selector, to address them.
 
 `--scope viewport` applies to both targets and rendered text. Layout text boxes
 restrict a long text node to its visible lines. `--scope page` includes offscreen
-page content. Child-frame contents are not mixed into main-frame observations.
+page content, including text reachable inside scroll containers. Overflow hidden
+or clipped text remains excluded. Child-frame contents are not mixed into
+main-frame observations.
 
 The default response budget is 12 KiB, including metadata and continuation hints.
 Text has no independent fixed 2 KiB cutoff. A larger `--max-bytes` can return more
@@ -90,11 +96,12 @@ cdp focus --ref OBSERVATION_ID:e3
 cdp type --text-file message.txt
 ```
 
-`check` and `select` verify the result and return `effect:none` when the requested
-state already matches. Radios can only be set to true. `select` supports native
-single selects with exactly one enabled option matched by value, label or its
-zero-based index; custom
-comboboxes use click/press. Selection emits input/change events. `fill` supports
+`check` and `select` read state before scrolling or dispatching input, and return
+`effect:none` when the requested state already matches. Actual changes still check
+visibility, enabled state and hit testing. Radios can only be set to true.
+`select` supports native single selects with exactly one enabled option matched
+by value, label or its zero-based index; custom comboboxes use click/press.
+Selection emits input/change events. `fill` supports
 text inputs, textareas and contenteditable surfaces using browser input, and
 verifies the resulting text. Custom editors can reject or transform that input;
 inspect a possible effect before retrying.
@@ -110,6 +117,9 @@ CDP hit testing for covered elements. CSS selectors keep normal main-document
 `querySelectorAll` semantics. Use references for shadow descendants. Browser-owned
 shadow internals are excluded. Child frames are listed with `supported:false` and
 marked in the text view; use raw CDP or viewport coordinates for those frames.
+If frame metadata exceeds the budget or the 32-frame observation limit,
+`framesTruncated:true` and `continuation.frames` give a `Page.getFrameTree` call
+for complete frame discovery.
 
 ## Discovery and recovery
 
@@ -127,8 +137,13 @@ actions. After a controller restart, supply the endpoint to `connect` again.
 
 `doctor` works before a controller exists and reports that missing prerequisite.
 For a running connection it probes `Browser.getVersion` and the selected target.
+An explicit `--tab` overrides the stored selection for diagnostics as well.
 Errors expose structured `recovery` objects; they recommend a next step but never
 execute it automatically.
+
+The browser-side functions are readable JavaScript files embedded into the Go
+binary. They do not require a JavaScript runtime on the CLI host. Flag validation
+and published schemas use the same numeric types and bounds.
 
 ## Relationship to browser-use
 

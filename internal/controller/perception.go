@@ -17,7 +17,6 @@ type domNode struct {
 	Backend      cdp.BackendNodeID `json:"backendNodeId"`
 	Tag          string            `json:"localName"`
 	Type         int               `json:"nodeType"`
-	Value        string            `json:"nodeValue"`
 	Attributes   []string          `json:"attributes"`
 	Children     []*domNode        `json:"children"`
 	Shadows      []*domNode        `json:"shadowRoots"`
@@ -90,12 +89,13 @@ type perception struct {
 	ax       map[cdp.BackendNodeID]axNode
 	order    []axNode
 	domOrder []*domNode
+	rendered map[cdp.BackendNodeID]string
 	text     string
 	viewport viewportInfo
 }
 
 func (t *tab) perceive(ctx context.Context, scope string) (*perception, error) {
-	p := &perception{nodes: map[cdp.BackendNodeID]*domNode{}, parents: map[cdp.BackendNodeID]*domNode{}, ax: map[cdp.BackendNodeID]axNode{}}
+	p := &perception{nodes: map[cdp.BackendNodeID]*domNode{}, parents: map[cdp.BackendNodeID]*domNode{}, ax: map[cdp.BackendNodeID]axNode{}, rendered: map[cdp.BackendNodeID]string{}}
 	var tree struct {
 		Root *domNode `json:"root"`
 	}
@@ -216,11 +216,11 @@ func (t *tab) perceive(ctx context.Context, scope string) (*perception, error) {
 				if len(r) < 4 {
 					continue
 				}
-				if strings.Contains(" auto scroll hidden clip ", " "+style(idx, 2)+" ") && style(idx, 2) != "" {
+				if clipsText(style(idx, 2), scope) {
 					left = max(left, r[0])
 					right = min(right, r[0]+r[2])
 				}
-				if strings.Contains(" auto scroll hidden clip ", " "+style(idx, 3)+" ") && style(idx, 3) != "" {
+				if clipsText(style(idx, 3), scope) {
 					top = max(top, r[1])
 					bottom = min(bottom, r[1]+r[3])
 				}
@@ -232,32 +232,6 @@ func (t *tab) perceive(ctx context.Context, scope string) (*perception, error) {
 			if idx >= 0 && idx < len(d.Nodes.Backends) {
 				clickable[d.Nodes.Backends[idx]] = true
 			}
-		}
-		for _, n := range p.domOrder {
-			if n.Type != 1 || n.Tag == "body" || n.Tag == "html" || interactive(p.ax[n.Backend]) || (!clickable[n.Backend] && !n.Scrollable) {
-				continue
-			}
-			ua := false
-			for ancestor := n; ancestor != nil; ancestor = p.parents[ancestor.Backend] {
-				if ancestor.Shadow == "user-agent" {
-					ua = true
-					break
-				}
-			}
-			if ua {
-				continue
-			}
-			role := "button"
-			if !clickable[n.Backend] {
-				role = "scrollbar"
-			}
-			name := n.attr("aria-label")
-			if name == "" {
-				name = nodeText(n, 200)
-			}
-			rb, _ := json.Marshal(role)
-			nb, _ := json.Marshal(name)
-			p.order = append(p.order, axNode{Inferred: true, BackendDOMNodeID: n.Backend, Role: &axValue{Value: rb}, Name: &axValue{Value: nb}})
 		}
 		for i, idx := range d.Layout.Indices {
 			if i >= len(d.Layout.Text) || i >= len(d.Layout.Bounds) || idx < 0 || idx >= len(d.Nodes.Backends) {
@@ -307,13 +281,41 @@ func (t *tab) perceive(ctx context.Context, scope string) (*perception, error) {
 						if piece != "" {
 							text.WriteString(piece)
 							text.WriteByte('\n')
+							p.rendered[d.Nodes.Backends[idx]] += piece + "\n"
 						}
 					}
 				} else {
 					text.WriteString(s)
 					text.WriteByte('\n')
+					p.rendered[d.Nodes.Backends[idx]] = s
 				}
 			}
+		}
+		for _, n := range p.domOrder {
+			if n.Type != 1 || n.Tag == "body" || n.Tag == "html" || interactive(p.ax[n.Backend]) || (!clickable[n.Backend] && !n.Scrollable) {
+				continue
+			}
+			ua := false
+			for ancestor := n; ancestor != nil; ancestor = p.parents[ancestor.Backend] {
+				if ancestor.Shadow == "user-agent" {
+					ua = true
+					break
+				}
+			}
+			if ua {
+				continue
+			}
+			role := "button"
+			if !clickable[n.Backend] {
+				role = "scrollbar"
+			}
+			name := n.attr("aria-label")
+			if name == "" {
+				name = p.nodeText(n, 200)
+			}
+			rb, _ := json.Marshal(role)
+			nb, _ := json.Marshal(name)
+			p.order = append(p.order, axNode{Inferred: true, BackendDOMNodeID: n.Backend, Role: &axValue{Value: rb}, Name: &axValue{Value: nb}})
 		}
 	}
 	p.text = strings.TrimSpace(text.String())
@@ -323,6 +325,18 @@ func (t *tab) perceive(ctx context.Context, scope string) (*perception, error) {
 func sensitiveInput(n *domNode) bool {
 	typ, autocomplete := strings.ToLower(n.attr("type")), strings.ToLower(n.attr("autocomplete"))
 	return typ == "password" || typ == "file" || typ == "hidden" || strings.Contains(autocomplete, "cc-") || strings.Contains(autocomplete, "one-time-code")
+}
+
+// Page scope includes content reachable by scrolling; hidden/clip content stays
+// excluded in either scope. Viewport scope clips scroll containers as well.
+func clipsText(overflow, scope string) bool {
+	switch overflow {
+	case "hidden", "clip":
+		return true
+	case "auto", "scroll":
+		return scope == "viewport"
+	}
+	return false
 }
 
 func (p *perception) ancestry(backend cdp.BackendNodeID) ([]group, []shadowBoundary) {
@@ -350,10 +364,10 @@ func (p *perception) ancestry(backend cdp.BackendNodeID) ([]group, []shadowBound
 				name = n.attr("aria-label")
 			}
 			if name == "" {
-				name = heading(n)
+				name = p.heading(n)
 			}
 			if name == "" && (role == "row" || role == "listitem") {
-				name = nodeText(n, 120)
+				name = p.nodeText(n, 120)
 			}
 			if name != "" || role == "dialog" || role == "form" || role == "main" {
 				depth := 0
@@ -378,15 +392,15 @@ func (p *perception) ancestry(backend cdp.BackendNodeID) ([]group, []shadowBound
 	return groups, shadows
 }
 
-func nodeText(n *domNode, max int) string {
+func (p *perception) nodeText(n *domNode, max int) string {
 	var b strings.Builder
 	var walk func(*domNode)
 	walk = func(n *domNode) {
 		if b.Len() >= max || sensitiveInput(n) || n.Tag == "script" || n.Tag == "style" {
 			return
 		}
-		if n.Type == 3 {
-			b.WriteString(n.Value)
+		if fragment := p.rendered[n.Backend]; fragment != "" {
+			b.WriteString(clip(fragment, max-b.Len()))
 			b.WriteByte(' ')
 		}
 		for _, child := range n.Children {
@@ -397,10 +411,12 @@ func nodeText(n *domNode, max int) string {
 	return clip(strings.Join(strings.Fields(b.String()), " "), max)
 }
 
-func heading(n *domNode) string {
+func (p *perception) heading(n *domNode) string {
 	for _, child := range n.Children {
 		if child.Tag == "legend" || child.Tag == "caption" || (len(child.Tag) == 2 && child.Tag[0] == 'h' && child.Tag[1] >= '1' && child.Tag[1] <= '6') {
-			return nodeText(child, 120)
+			if name := p.nodeText(child, 120); name != "" {
+				return name
+			}
 		}
 	}
 	return ""

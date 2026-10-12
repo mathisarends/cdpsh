@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -219,20 +217,14 @@ func parse(args []string) (protocol.Request, string, error) {
 				return r, format, protocol.Fail("INVALID_ARGUMENT", "Flag --"+name+" is not valid for "+r.Command)
 			}
 		}
-		if len(spec.Choices) > 0 {
-			found := false
-			for _, v := range spec.Choices {
-				found = found || v == value
-			}
-			if !found {
-				return r, format, protocol.Fail("INVALID_ARGUMENT", "Invalid value for --"+name)
-			}
+		if err := validateFlagValue(name, value, spec); err != nil {
+			return r, format, err
 		}
 	}
 	if len(r.Args) < d.Min || len(r.Args) > d.Max {
 		return r, format, protocol.Fail("INVALID_ARGUMENT", "Usage: "+d.Usage)
 	}
-	if (targetCommand(r.Command)) && len(r.Args) == 1 {
+	if targetCommand(r.Command) && len(r.Args) == 1 {
 		if r.Flags["ref"] != "" {
 			return r, format, protocol.Fail("INVALID_ARGUMENT", "Provide only one reference")
 		}
@@ -273,14 +265,6 @@ func parse(args []string) (protocol.Request, string, error) {
 			}
 		}
 	}
-	for _, k := range []string{"x", "y", "dx", "dy"} {
-		if has(k) {
-			f, e := strconv.ParseFloat(r.Flags[k], 64)
-			if e != nil || math.IsNaN(f) || math.IsInf(f, 0) {
-				return r, format, protocol.Fail("INVALID_ARGUMENT", "--"+k+" must be a finite number")
-			}
-		}
-	}
 	if r.Command == "scroll" && !has("dy") {
 		return r, format, protocol.Fail("INVALID_ARGUMENT", "scroll requires --dy")
 	}
@@ -317,34 +301,6 @@ func parse(args []string) (protocol.Request, string, error) {
 	if r.Command == "press" {
 		if _, _, err := controller.KeySpec(r.Args[0]); err != nil {
 			return r, format, err
-		}
-	}
-	for _, k := range []string{"limit", "max-bytes"} {
-		if has(k) {
-			n, e := strconv.Atoi(r.Flags[k])
-			min, max := 1, 500
-			if k == "max-bytes" {
-				min, max = 2048, 65536
-			}
-			if e != nil || n < min || n > max {
-				return r, format, protocol.Fail("INVALID_ARGUMENT", fmt.Sprintf("--%s must be in %d..%d", k, min, max))
-			}
-		}
-	}
-	if has("index") {
-		n, e := strconv.Atoi(r.Flags["index"])
-		if e != nil || n < 0 || n > 2147483647 {
-			return r, format, protocol.Fail("INVALID_ARGUMENT", "--index must be a nonnegative integer up to 2147483647")
-		}
-	}
-	if has("offset") {
-		n, e := strconv.Atoi(r.Flags["offset"])
-		maxOffset := 1000000
-		if r.Command == "read" {
-			maxOffset = 2147483647
-		}
-		if e != nil || n < 0 || n > maxOffset {
-			return r, format, protocol.Fail("INVALID_ARGUMENT", fmt.Sprintf("--offset must be an integer in 0..%d", maxOffset))
 		}
 	}
 	timeout := 10 * time.Second
@@ -505,115 +461,4 @@ func Run(args []string, in io.Reader, out, stderr io.Writer) int {
 		return 1
 	}
 	return response.ExitCode()
-}
-func renderText(out io.Writer, r protocol.Response) error {
-	if !r.OK {
-		_, err := fmt.Fprintf(out, "%s: %s (effect=%s)\n", r.Error.Code, r.Error.Message, r.Error.Effect)
-		if err != nil {
-			return err
-		}
-		if r.Error.Recovery != nil {
-			b, _ := json.Marshal(r.Error.Recovery)
-			_, err = fmt.Fprintf(out, "recovery=%s\n", b)
-		} else if r.Error.Next != "" {
-			_, err = fmt.Fprintf(out, "next=%s\n", r.Error.Next)
-		}
-		return err
-	}
-	b, _ := json.Marshal(r.Result)
-	var obs struct {
-		Observation  string                         `json:"observation"`
-		URL          string                         `json:"url"`
-		Title        string                         `json:"title"`
-		Elements     []map[string]any               `json:"elements"`
-		Text         string                         `json:"text"`
-		Truncated    bool                           `json:"truncated"`
-		Viewport     map[string]any                 `json:"viewport"`
-		Frames       []map[string]any               `json:"frames"`
-		Continuation map[string]protocol.Invocation `json:"continuation"`
-		Next         any                            `json:"next"`
-	}
-	_ = json.Unmarshal(b, &obs)
-	if obs.Observation == "" {
-		_, err := fmt.Fprintln(out, string(b))
-		return err
-	}
-	var text strings.Builder
-	fmt.Fprintf(&text, "tab=%s observation=%s title=%q url=%q\n", r.Tab, obs.Observation, obs.Title, obs.URL)
-	if obs.Viewport != nil {
-		fmt.Fprintf(&text, "viewport=%vx%v scroll=%v,%v above=%vpx below=%vpx\n", obs.Viewport["width"], obs.Viewport["height"], obs.Viewport["x"], obs.Viewport["y"], obs.Viewport["above"], obs.Viewport["below"])
-	}
-	previous := ""
-	for _, e := range obs.Elements {
-		context, _ := json.Marshal(e["context"])
-		shadow, _ := json.Marshal(e["shadow"])
-		ancestry := string(context) + string(shadow)
-		depth := 0
-		if groups, ok := e["context"].([]any); ok {
-			depth += len(groups)
-		}
-		if shadows, ok := e["shadow"].([]any); ok {
-			depth += len(shadows)
-		}
-		if ancestry != previous {
-			level := 0
-			shadowLevel := 0
-			shadows, _ := e["shadow"].([]any)
-			printShadow := func() {
-				item := shadows[shadowLevel].(map[string]any)
-				fmt.Fprintf(&text, "%s|SHADOW(%s)| %s\n", strings.Repeat("  ", level), item["mode"], item["host"])
-				level++
-				shadowLevel++
-			}
-			if groups, ok := e["context"].([]any); ok {
-				for _, g := range groups {
-					item := g.(map[string]any)
-					shadowDepth, _ := item["shadowDepth"].(float64)
-					for shadowLevel < len(shadows) && shadowLevel < int(shadowDepth) {
-						printShadow()
-					}
-					name, _ := item["name"].(string)
-					fmt.Fprintf(&text, "%s%s %q\n", strings.Repeat("  ", level), item["role"], name)
-					level++
-				}
-			}
-			for shadowLevel < len(shadows) {
-				printShadow()
-			}
-			previous = ancestry
-		}
-		marker := ""
-		if e["new"] == true {
-			marker = "*"
-		}
-		fmt.Fprintf(&text, "%s%s[%s] %s %q", strings.Repeat("  ", depth), marker, e["ref"], e["role"], e["name"])
-		for _, key := range []string{"inferred", "disabled", "checked", "selected", "expanded", "pressed", "focused", "readonly", "required", "inputType", "placeholder", "value", "valueTruncated", "options", "optionCount", "optionsTruncated", "scrollable", "scrollAbove", "scrollBelow"} {
-			if v, ok := e[key]; ok {
-				value, _ := json.Marshal(v)
-				fmt.Fprintf(&text, " %s=%s", key, value)
-			}
-		}
-		text.WriteByte('\n')
-	}
-	for _, frame := range obs.Frames {
-		if frame["supported"] == false {
-			fmt.Fprintf(&text, "|IFRAME unsupported| id=%s url=%q; use raw CDP or coordinates\n", frame["id"], frame["url"])
-		}
-	}
-	if obs.Text != "" {
-		fmt.Fprintln(&text, "text:")
-		fmt.Fprintln(&text, obs.Text)
-	}
-	if obs.Truncated {
-		text.WriteString("[truncated]\n")
-	}
-	if len(obs.Continuation) > 0 {
-		next, _ := json.Marshal(obs.Continuation)
-		fmt.Fprintf(&text, "continuation=%s\n", next)
-	} else if obs.Next != nil {
-		next, _ := json.Marshal(obs.Next)
-		fmt.Fprintf(&text, "next=%s\n", next)
-	}
-	_, err := io.WriteString(out, text.String())
-	return err
 }

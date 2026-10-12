@@ -58,7 +58,8 @@ may reject or transform input, producing a verification error with a possible ef
 true|false` sets a checkbox/switch/radio state; `select TARGET --value VALUE`,
 `--label LABEL` or `--index N` selects one option in a native single select.
 `options TARGET` lists options with continuation; observations include the first
-five. Matching states are no-ops; both actions verify their result. Scrolling uses
+five. Matching states are no-ops without scrolling; both actions verify their
+result. Scrolling uses
 the DOM scrolling APIs; clicks use CDP input after visibility, enabled-state and
 hit-test checks.
 
@@ -134,7 +135,9 @@ Text has no fixed 2 KiB ceiling. `continuation.text` and `read --observation ID
 --offset N` return more text from the same captured observation without evicting
 references. `continuation.elements` gives an `observe --offset N` invocation for
 more targets, including beyond 500 elements. Viewport scope applies to rendered
-text and targets. See the [agent observation contract](agent-observations.md).
+text and targets; page scope also includes text reachable in scroll containers.
+`framesTruncated` and `continuation.frames` expose complete frame discovery when
+the compact list is bounded. See the [agent observation contract](agent-observations.md).
 Large eval/CDP values are saved losslessly to JSON files. Screenshots are PNG files.
 Results give absolute paths, byte sizes and media types; no Base64 is printed.
 Existing output files require `--overwrite`. Password values are not echoed by

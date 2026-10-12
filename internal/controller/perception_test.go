@@ -41,3 +41,14 @@ func TestRecoveryPreservesBrowserContextAndTab(t *testing.T) {
 		t.Fatal("closed-tab recovery retained unavailable override")
 	}
 }
+
+func TestTextClippingDistinguishesScrollableAndHiddenContent(t *testing.T) {
+	for _, overflow := range []string{"auto", "scroll", "hidden", "clip", "visible", ""} {
+		if clipsText(overflow, "page") != (overflow == "hidden" || overflow == "clip") {
+			t.Errorf("page scope clips %q incorrectly", overflow)
+		}
+		if clipsText(overflow, "viewport") != (overflow == "auto" || overflow == "scroll" || overflow == "hidden" || overflow == "clip") {
+			t.Errorf("viewport scope clips %q incorrectly", overflow)
+		}
+	}
+}

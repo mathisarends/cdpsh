@@ -152,17 +152,15 @@ func inputSchema(command string, d Definition) map[string]any {
 		all = append(all, map[string]any{"oneOf": alternatives})
 		all = append(all, map[string]any{"dependentRequired": map[string]any{"name": []string{"role"}}})
 	}
-	for _, sources := range [][]string{inputSources(command)} {
-		if len(sources) > 0 {
-			one := []any{}
-			for _, key := range sources {
-				one = append(one, requiredFlag(key))
-			}
-			if command == "call" {
-				one = append(one, map[string]any{"not": map[string]any{"anyOf": one}})
-			}
-			all = append(all, map[string]any{"oneOf": one})
+	if sources := inputSources(command); len(sources) > 0 {
+		one := []any{}
+		for _, key := range sources {
+			one = append(one, requiredFlag(key))
 		}
+		if command == "call" {
+			one = append(one, map[string]any{"not": map[string]any{"anyOf": one}})
+		}
+		all = append(all, map[string]any{"oneOf": one})
 	}
 	switch command {
 	case "connect":
@@ -268,13 +266,13 @@ func resultSchema(command string) map[string]any {
 	case "observe":
 		put("string", "observation url title text next")
 		put("integer", "textBytes textNext elementOffset elementNext")
-		put("boolean", "truncated")
+		put("boolean", "truncated framesTruncated")
 		viewport := map[string]any{}
 		for _, k := range []string{"width", "height", "x", "y", "above", "below"} {
 			viewport[k] = primitive("number")
 		}
 		props["viewport"] = objectSchema(viewport, "width", "height", "x", "y", "above", "below")
-		props["continuation"] = objectSchema(map[string]any{"text": invocationSchema(), "elements": invocationSchema()})
+		props["continuation"] = objectSchema(map[string]any{"text": invocationSchema(), "elements": invocationSchema(), "frames": invocationSchema()})
 		e := map[string]any{}
 		for _, k := range []string{"ref", "role", "name", "frame", "tag", "id", "value", "placeholder", "inputType"} {
 			e[k] = primitive("string")

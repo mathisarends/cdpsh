@@ -95,23 +95,28 @@ func (t *tab) actionable(ctx context.Context, r protocol.Request) (runtime.Remot
 	if err != nil {
 		return "", layout{}, err
 	}
+	l, err := t.actionableObject(ctx, id)
+	return id, l, err
+}
+
+func (t *tab) actionableObject(ctx context.Context, id runtime.RemoteObjectID) (layout, error) {
 	l, err := t.layout(ctx, id, true, true)
 	if err != nil {
-		return "", l, protocol.Effect(err, "possible")
+		return l, protocol.Effect(err, "possible")
 	}
 	if !l.Connected {
-		return "", l, &protocol.Error{Code: "STALE_REF", Message: "Target was removed", Effect: "possible", Next: "observe"}
+		return l, &protocol.Error{Code: "STALE_REF", Message: "Target was removed", Effect: "possible", Next: "observe"}
 	}
 	if !l.Visible || !l.Viewport {
-		return "", l, protocol.Fail("NOT_VISIBLE", "Target is not visible")
+		return l, protocol.Fail("NOT_VISIBLE", "Target is not visible")
 	}
 	if l.Disabled {
-		return "", l, protocol.Fail("DISABLED", "Target is disabled")
+		return l, protocol.Fail("DISABLED", "Target is disabled")
 	}
 	if l.Obscured {
-		return "", l, protocol.Fail("OBSCURED", "Target is covered by another element")
+		return l, protocol.Fail("OBSCURED", "Target is covered by another element")
 	}
-	return id, l, nil
+	return l, nil
 }
 func (c *Controller) click(ctx context.Context, t *tab, r protocol.Request) (any, error) {
 	if _, err := t.checkFrame(ctx, r); err != nil {
@@ -150,7 +155,7 @@ func (c *Controller) fill(ctx context.Context, t *tab, r protocol.Request) (any,
 	if !l.Editable {
 		return nil, protocol.Fail("NOT_EDITABLE", "Target is not a supported editable input, textarea or contenteditable")
 	}
-	if _, err = t.function(ctx, id, `function(){this.focus();if(this.isContentEditable){const range=document.createRange();range.selectNodeContents(this);const selection=document.getSelection();selection.removeAllRanges();selection.addRange(range)}else this.select();return true}`); err != nil {
+	if _, err = t.function(ctx, id, fillFocusJS); err != nil {
 		return nil, protocol.Effect(err, "possible")
 	}
 	if r.Payload == "" {

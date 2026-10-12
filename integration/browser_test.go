@@ -333,6 +333,7 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 	}
 	ok(t, h.call("doctor"))
 	testErgonomics(t, h)
+	testReviewRegressions(t, h)
 	t.Logf("Blank-profile Chrome acceptance passed; controller epoch %s; screenshot %s", fmt.Sprint(epoch), shot)
 }
 

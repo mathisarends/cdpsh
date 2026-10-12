@@ -91,6 +91,9 @@ func (c *Controller) diagnostics(ctx context.Context, r protocol.Request) (any, 
 	c.mu.Lock()
 	b, selected := c.browsers[r.Browser], c.selections[selection(r)]
 	c.mu.Unlock()
+	if r.Tab != "" {
+		selected = r.Tab
+	}
 	connected := false
 	checks := map[string]any{"controller": true, "cdp": false, "selectedTab": false}
 	if b != nil {

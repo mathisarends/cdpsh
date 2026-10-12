@@ -4,17 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strconv"
-	"strings"
-	"time"
 	"unicode/utf8"
 
 	"cdpsh/internal/protocol"
-	"github.com/chromedp/cdproto/accessibility"
 	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/dom"
-	"github.com/chromedp/cdproto/runtime"
 )
 
 type reference struct {
@@ -43,20 +37,21 @@ type element struct {
 	elementState
 }
 type observationResult struct {
-	Observation   string                         `json:"observation"`
-	URL           string                         `json:"url"`
-	Title         string                         `json:"title"`
-	Elements      []element                      `json:"elements"`
-	Text          string                         `json:"text"`
-	Frames        []frameInfo                    `json:"frames"`
-	Truncated     bool                           `json:"truncated"`
-	Next          string                         `json:"next,omitempty"`
-	Viewport      viewportInfo                   `json:"viewport"`
-	TextBytes     int                            `json:"textBytes"`
-	TextNext      *int                           `json:"textNext,omitempty"`
-	ElementOffset int                            `json:"elementOffset"`
-	ElementNext   *int                           `json:"elementNext,omitempty"`
-	Continuation  map[string]protocol.Invocation `json:"continuation,omitempty"`
+	Observation     string                         `json:"observation"`
+	URL             string                         `json:"url"`
+	Title           string                         `json:"title"`
+	Elements        []element                      `json:"elements"`
+	Text            string                         `json:"text"`
+	Frames          []frameInfo                    `json:"frames"`
+	FramesTruncated bool                           `json:"framesTruncated,omitempty"`
+	Truncated       bool                           `json:"truncated"`
+	Next            string                         `json:"next,omitempty"`
+	Viewport        viewportInfo                   `json:"viewport"`
+	TextBytes       int                            `json:"textBytes"`
+	TextNext        *int                           `json:"textNext,omitempty"`
+	ElementOffset   int                            `json:"elementOffset"`
+	ElementNext     *int                           `json:"elementNext,omitempty"`
+	Continuation    map[string]protocol.Invocation `json:"continuation,omitempty"`
 }
 type frameInfo struct {
 	ID        string `json:"id"`
@@ -101,221 +96,6 @@ func intFlag(r protocol.Request, name string, def int) int {
 	return def
 }
 
-// Decode only the AX fields we use. cdproto's generated enum unmarshallers
-// reject new Chrome properties, even if those properties are irrelevant here.
-type axValue struct {
-	Value json.RawMessage `json:"value"`
-}
-type axNode struct {
-	Inferred         bool              `json:"-"`
-	Ignored          bool              `json:"ignored"`
-	BackendDOMNodeID cdp.BackendNodeID `json:"backendDOMNodeId"`
-	Role             *axValue          `json:"role"`
-	Name             *axValue          `json:"name"`
-	Properties       []struct {
-		Name  string   `json:"name"`
-		Value *axValue `json:"value"`
-	} `json:"properties"`
-}
-
-func (t *tab) ax(ctx context.Context) ([]axNode, error) {
-	var result struct {
-		Nodes []axNode `json:"nodes"`
-	}
-	err := t.call(ctx, accessibility.CommandGetFullAXTree, nil, &result)
-	return result.Nodes, err
-}
-func axString(v *axValue) string {
-	if v == nil {
-		return ""
-	}
-	var s string
-	_ = json.Unmarshal(v.Value, &s)
-	return s
-}
-func interactive(n axNode) bool {
-	switch axString(n.Role) {
-	case "button", "link", "textbox", "searchbox", "checkbox", "radio", "combobox", "listbox", "option", "menuitem", "menuitemcheckbox", "menuitemradio", "switch", "slider", "spinbutton", "tab", "treeitem", "scrollbar":
-		return true
-	}
-	for _, p := range n.Properties {
-		if p.Name == "focusable" && string(p.Value.Value) == "true" {
-			return true
-		}
-	}
-	return false
-}
-func (t *tab) evaluate(ctx context.Context, expression string) (json.RawMessage, error) {
-	obj, exception, err := runtime.Evaluate(expression).WithAwaitPromise(true).WithReturnByValue(true).Do(t.typed(ctx))
-	if err != nil {
-		return nil, err
-	}
-	if exception != nil {
-		return nil, protocol.Fail("EXECUTION_ERROR", clip(exception.Text+exceptionDescription(exception), 512))
-	}
-	if obj.UnserializableValue != "" {
-		b, _ := json.Marshal(map[string]any{"type": obj.Type, "unserializableValue": obj.UnserializableValue})
-		return b, nil
-	}
-	if len(obj.Value) == 0 {
-		b, _ := json.Marshal(map[string]any{"type": obj.Type})
-		return b, nil
-	}
-	return json.RawMessage(obj.Value), nil
-}
-func exceptionDescription(e *runtime.ExceptionDetails) string {
-	if e.Exception != nil && e.Exception.Description != "" {
-		return ": " + e.Exception.Description
-	}
-	return ""
-}
-func (t *tab) function(ctx context.Context, id runtime.RemoteObjectID, fn string, args ...any) (json.RawMessage, error) {
-	arguments := make([]*runtime.CallArgument, 0, len(args))
-	for _, arg := range args {
-		b, _ := json.Marshal(arg)
-		arguments = append(arguments, &runtime.CallArgument{Value: b})
-	}
-	obj, exception, err := runtime.CallFunctionOn(fn).WithObjectID(id).WithArguments(arguments).WithReturnByValue(true).WithAwaitPromise(true).Do(t.typed(ctx))
-	if err != nil {
-		return nil, err
-	}
-	if exception != nil {
-		return nil, protocol.Fail("EXECUTION_ERROR", clip(exception.Text+exceptionDescription(exception), 512))
-	}
-	if len(obj.Value) == 0 {
-		return json.RawMessage(`null`), nil
-	}
-	return json.RawMessage(obj.Value), nil
-}
-func (t *tab) document(ctx context.Context) (cdp.BackendNodeID, error) {
-	node, err := dom.GetDocument().Do(t.typed(ctx))
-	if err != nil {
-		return 0, err
-	}
-	return node.BackendNodeID, nil
-}
-func (t *tab) frames(ctx context.Context) ([]frameInfo, error) {
-	var tree struct {
-		FrameTree struct {
-			Frame struct {
-				ID  string `json:"id"`
-				URL string `json:"url"`
-			} `json:"frame"`
-			ChildFrames []json.RawMessage `json:"childFrames"`
-		} `json:"frameTree"`
-	}
-	if err := t.call(ctx, "Page.getFrameTree", nil, &tree); err != nil {
-		return nil, err
-	}
-	frames := []frameInfo{{ID: tree.FrameTree.Frame.ID, URL: clip(tree.FrameTree.Frame.URL, 1024), Supported: true}}
-	var add func(json.RawMessage, string)
-	add = func(raw json.RawMessage, parent string) {
-		var child struct {
-			Frame struct {
-				ID  string `json:"id"`
-				URL string `json:"url"`
-			} `json:"frame"`
-			ChildFrames []json.RawMessage `json:"childFrames"`
-		}
-		if json.Unmarshal(raw, &child) != nil || len(frames) >= 32 {
-			return
-		}
-		frames = append(frames, frameInfo{ID: child.Frame.ID, URL: clip(child.Frame.URL, 512), Parent: parent})
-		for _, v := range child.ChildFrames {
-			add(v, child.Frame.ID)
-		}
-	}
-	for _, v := range tree.FrameTree.ChildFrames {
-		add(v, tree.FrameTree.Frame.ID)
-	}
-	return frames, nil
-}
-func (t *tab) checkFrame(ctx context.Context, r protocol.Request) (string, error) {
-	frames, err := t.frames(ctx)
-	if err != nil {
-		return "", err
-	}
-	main := frames[0].ID
-	if r.Flags["frame"] != "" && r.Flags["frame"] != main {
-		return "", &protocol.Error{Code: "UNSUPPORTED", Message: "High-level commands support the main frame; use raw CDP or viewport coordinates for child frames", Effect: "none", Next: "call"}
-	}
-	return main, nil
-}
-func (t *tab) object(ctx context.Context, backend cdp.BackendNodeID) (runtime.RemoteObjectID, error) {
-	obj, err := dom.ResolveNode().WithBackendNodeID(backend).WithObjectGroup("cdpsh").Do(t.typed(ctx))
-	if err != nil {
-		return "", err
-	}
-	return obj.ObjectID, nil
-}
-func (t *tab) layout(ctx context.Context, id runtime.RemoteObjectID, scroll, hit bool) (layout, error) {
-	value, err := t.function(ctx, id, layoutJS, scroll, hit)
-	var out layout
-	if err != nil {
-		return out, err
-	}
-	err = json.Unmarshal(value, &out)
-	if err != nil || !hit || !out.Obscured || !out.Visible || !out.Viewport {
-		return out, err
-	}
-	for _, point := range [][2]float64{{.5, .5}, {.2, .2}, {.8, .2}, {.2, .8}, {.8, .8}} {
-		x, y := out.Left+(out.Right-out.Left)*point[0], out.Top+(out.Bottom-out.Top)*point[1]
-		backend, _, _, err := dom.GetNodeForLocation(int64(math.Floor(x)), int64(math.Floor(y))).Do(t.typed(ctx))
-		if err != nil {
-			if ctx.Err() != nil {
-				return out, ctx.Err()
-			}
-			continue
-		}
-		hitID, err := t.object(ctx, backend)
-		if err != nil {
-			continue
-		}
-		result, exception, err := runtime.CallFunctionOn(`function(n){while(n){if(n===this||this.contains(n))return true;n=n.assignedSlot||n.parentNode||n.host}return false}`).WithObjectID(id).WithArguments([]*runtime.CallArgument{{ObjectID: hitID}}).WithReturnByValue(true).Do(t.typed(ctx))
-		if err != nil {
-			return out, err
-		}
-		if exception != nil {
-			return out, protocol.Fail("EXECUTION_ERROR", "Hit test failed")
-		}
-		if string(result.Value) == "true" {
-			out.X, out.Y, out.Obscured = x, y, false
-			break
-		}
-	}
-	return out, nil
-}
-
-const layoutJS = `function(scroll,hit){
- const e=this;if(!(e instanceof Element)||!e.isConnected||e.ownerDocument!==document)return {connected:false};
- if(scroll)e.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
- const r=e.getBoundingClientRect(),s=getComputedStyle(e);
- let left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);
- let visible=r.width>0&&r.height>0&&s.visibility==='visible'&&s.display!=='none'&&e.getClientRects().length>0,disabled=e.matches(':disabled')||e.getAttribute('aria-disabled')==='true';
- for(let p=e;p;p=p.assignedSlot||p.parentElement||p.getRootNode().host){
-   const ps=getComputedStyle(p);if(ps.opacity==='0'||ps.display==='none'||p.hidden)visible=false;
-   if(p.inert)disabled=true;
-   if(p!==e){const b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(ps.overflowX)){left=Math.max(left,b.left);right=Math.min(right,b.right)}if(/auto|scroll|hidden|clip/.test(ps.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom)}}
- }
- const viewport=right>left&&bottom>top;let x=(left+right)/2,y=(top+bottom)/2,obscured=hit;
- const owns=n=>{while(n){if(n===e||e.contains(n))return true;n=n.assignedSlot||n.parentNode||n.host}return false};
- if(hit&&viewport){for(const [a,b] of [[.5,.5],[.2,.2],[.8,.2],[.2,.8],[.8,.8]]){
-   const px=left+(right-left)*a,py=top+(bottom-top)*b;let n=document.elementFromPoint(px,py);
-   while(n&&n.shadowRoot){const child=n.shadowRoot.elementFromPoint(px,py);if(!child||child===n)break;n=child}
-   if(owns(n)){x=px;y=py;obscured=false;break}
- }}
- const boolAttr=n=>e.hasAttribute(n)?e.getAttribute(n)==='true':undefined;
- const tri=n=>e.hasAttribute(n)?(e.getAttribute(n)==='mixed'?'mixed':e.getAttribute(n)==='true'):undefined;
- let active=document.activeElement;while(active?.shadowRoot?.activeElement)active=active.shadowRoot.activeElement;
- const root=e.getRootNode(),focused=active===e||root.activeElement===e;
- const sensitive=['password','file','hidden'].includes(e.type)||/(cc-|one-time-code)/i.test(e.autocomplete||'');
- const raw=!sensitive&&('value' in e)&&!['checkbox','radio','submit','button','reset'].includes(e.type)?String(e.value):undefined;
- const state={checked:('checked' in e)?(e.indeterminate?'mixed':e.checked):tri('aria-checked'),selected:('selected' in e)?e.selected:boolAttr('aria-selected'),expanded:boolAttr('aria-expanded'),pressed:tri('aria-pressed'),focused,readonly:!!e.readOnly||e.getAttribute('aria-readonly')==='true',required:!!e.required||e.getAttribute('aria-required')==='true',value:raw?.slice(0,512),valueTruncated:raw!==undefined&&raw.length>512,placeholder:e.getAttribute('placeholder')||e.getAttribute('aria-placeholder')||undefined,inputType:e instanceof HTMLInputElement?e.type:undefined,scrollable:(e.scrollHeight>e.clientHeight&&/auto|scroll/.test(s.overflowY))||(e.scrollWidth>e.clientWidth&&/auto|scroll/.test(s.overflowX)),scrollAbove:e.scrollTop,scrollBelow:Math.max(0,e.scrollHeight-e.clientHeight-e.scrollTop)};
- if(e instanceof HTMLSelectElement&&!sensitive){state.options=Array.from(e.options).slice(0,5).map(o=>({index:o.index,value:o.value.slice(0,128),label:o.label.slice(0,128),disabled:o.disabled||!!o.parentElement?.disabled,selected:o.selected,truncated:o.value.length>128||o.label.length>128}));state.optionCount=e.options.length;state.optionsTruncated=e.options.length>5;}
- if(!state.scrollable){delete state.scrollAbove;delete state.scrollBelow}
- return {connected:true,visible,viewport,disabled,editable:!e.readOnly&&!disabled&&((e instanceof HTMLInputElement&&['text','email','password','search','tel','url'].includes(e.type))||e instanceof HTMLTextAreaElement||e.isContentEditable),x,y,left,right,top,bottom,obscured,state};
-}`
-
 func (c *Controller) observe(ctx context.Context, t *tab, r protocol.Request) (any, error) {
 	frame, err := t.checkFrame(ctx, r)
 	if err != nil {
@@ -346,11 +126,11 @@ func (c *Controller) observe(ctx context.Context, t *tab, r protocol.Request) (a
 	}
 	o := &observation{ID: "o" + randomID(), Refs: map[string]reference{}, Text: p.text, Document: doc}
 	out := observationResult{Observation: o.ID, URL: clip(meta.URL, 2048), Title: clip(meta.Title, 256), Elements: []element{}, Text: p.text, Viewport: p.viewport, TextBytes: len(p.text), ElementOffset: intFlag(r, "offset", 0)}
-	out.Frames, err = t.frames(ctx)
+	out.Frames, out.FramesTruncated, err = t.frames(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out.Truncated = out.URL != meta.URL || out.Title != meta.Title
+	out.Truncated = out.URL != meta.URL || out.Title != meta.Title || out.FramesTruncated
 	t.mu.Lock()
 	previous := map[cdp.BackendNodeID]bool{}
 	history := t.observations[r.Context]
@@ -448,9 +228,15 @@ func (c *Controller) observe(ctx context.Context, t *tab, r protocol.Request) (a
 			}
 			out.Continuation["elements"] = protocol.Invocation{Command: "observe", Flags: f}
 		}
+		if out.FramesTruncated {
+			next := invocation(r, "call")
+			next.Args = []string{"Page.getFrameTree"}
+			next.Flags["tab"] = t.id
+			out.Continuation["frames"] = next
+		}
 		if len(out.Continuation) > 0 {
 			out.Truncated = true
-			out.Next = "Use continuation.text to read the same snapshot, or continuation.elements for more targets"
+			out.Next = "Use structured continuation commands for remaining text, targets or frame metadata"
 		}
 	}
 	update()
@@ -469,6 +255,7 @@ func (c *Controller) observe(ctx context.Context, t *tab, r protocol.Request) (a
 			out.ElementNext = &next
 		} else if len(out.Frames) > 1 {
 			out.Frames = out.Frames[:len(out.Frames)-1]
+			out.FramesTruncated = true
 			out.Truncated = true
 		} else {
 			out.URL = clip(out.URL, 256)
@@ -543,126 +330,4 @@ func (c *Controller) read(ctx context.Context, t *tab, r protocol.Request) (any,
 			return nil, protocol.Fail("INVALID_ARGUMENT", "Response metadata exceeds budget; increase --max-bytes")
 		}
 	}
-}
-
-func (t *tab) resolve(ctx context.Context, r protocol.Request) (runtime.RemoteObjectID, error) {
-	frame, err := t.checkFrame(ctx, r)
-	if err != nil {
-		return "", err
-	}
-	if ref := r.Flags["ref"]; ref != "" {
-		t.mu.Lock()
-		var o *observation
-		for _, candidate := range t.observations[r.Context] {
-			if strings.HasPrefix(ref, candidate.ID+":") {
-				o = candidate
-				break
-			}
-		}
-		var v reference
-		var found bool
-		if o != nil {
-			v, found = o.Refs[ref]
-		}
-		t.mu.Unlock()
-		stale := &protocol.Error{Code: "STALE_REF", Message: "Element reference expired or was removed", Effect: "none", Next: "observe"}
-		if !found || v.Frame != frame {
-			return "", stale
-		}
-		doc, err := t.document(ctx)
-		if err != nil {
-			return "", err
-		}
-		if doc != v.Document {
-			return "", stale
-		}
-		id, err := t.object(ctx, v.Backend)
-		if err != nil {
-			if ctx.Err() != nil {
-				return "", ctx.Err()
-			}
-			return "", stale
-		}
-		l, err := t.layout(ctx, id, false, false)
-		if err != nil || !l.Connected {
-			if ctx.Err() != nil {
-				return "", ctx.Err()
-			}
-			return "", stale
-		}
-		return id, nil
-	}
-	var backends []cdp.BackendNodeID
-	candidates := []map[string]string{}
-	if css, ok := r.Flags["css"]; ok {
-		quoted, _ := json.Marshal(css)
-		var res struct {
-			Result struct {
-				ObjectID runtime.RemoteObjectID `json:"objectId"`
-			} `json:"result"`
-			Exception json.RawMessage `json:"exceptionDetails"`
-		}
-		if err = t.call(ctx, "Runtime.evaluate", map[string]any{"expression": "Array.from(document.querySelectorAll(" + string(quoted) + "))", "objectGroup": "cdpsh"}, &res); err != nil {
-			return "", err
-		}
-		if len(res.Exception) > 0 {
-			return "", protocol.Fail("INVALID_ARGUMENT", "Invalid CSS selector")
-		}
-		var props struct {
-			Result []struct {
-				Name  string `json:"name"`
-				Value struct {
-					ObjectID runtime.RemoteObjectID `json:"objectId"`
-				} `json:"value"`
-			} `json:"result"`
-		}
-		if err = t.call(ctx, "Runtime.getProperties", map[string]any{"objectId": res.Result.ObjectID, "ownProperties": true}, &props); err != nil {
-			return "", err
-		}
-		for _, p := range props.Result {
-			if _, err := strconv.Atoi(p.Name); err != nil {
-				continue
-			}
-			node, err := dom.DescribeNode().WithObjectID(p.Value.ObjectID).Do(t.typed(ctx))
-			if err == nil {
-				backends = append(backends, node.BackendNodeID)
-				if len(candidates) < 5 {
-					candidate := map[string]string{"tag": clip(node.LocalName, 80)}
-					for i := 0; i+1 < len(node.Attributes); i += 2 {
-						if node.Attributes[i] == "id" {
-							candidate["id"] = clip(node.Attributes[i+1], 100)
-						}
-					}
-					candidates = append(candidates, candidate)
-				}
-			}
-		}
-	} else {
-		nodes, err := t.ax(ctx)
-		if err != nil {
-			return "", err
-		}
-		for _, n := range nodes {
-			if !n.Ignored && n.BackendDOMNodeID != 0 && axString(n.Role) == r.Flags["role"] {
-				if name, ok := r.Flags["name"]; !ok || name == axString(n.Name) {
-					backends = append(backends, n.BackendDOMNodeID)
-					if len(candidates) < 5 {
-						candidates = append(candidates, map[string]string{"role": clip(axString(n.Role), 80), "name": clip(axString(n.Name), 200)})
-					}
-				}
-			}
-		}
-	}
-	if len(backends) == 0 {
-		return "", protocol.Fail("TARGET_NOT_FOUND", "Target did not match an element")
-	}
-	if len(backends) > 1 {
-		return "", &protocol.Error{Code: "AMBIGUOUS_TARGET", Message: "Target matched multiple elements; narrow the selector or use a fresh reference", Effect: "none", Next: "observe", Details: map[string]any{"count": len(backends), "candidates": candidates, "truncated": len(backends) > len(candidates)}}
-	}
-	return t.object(ctx, backends[0])
-}
-func (t *tab) release(ctx context.Context) {
-	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
-	defer cancel()
-	_ = runtime.ReleaseObjectGroup("cdpsh").Do(t.typed(cleanup))
 }

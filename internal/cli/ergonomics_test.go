@@ -98,3 +98,36 @@ func TestTextTreePreservesStateBoundariesAndRecovery(t *testing.T) {
 		t.Fatal("text error dropped recovery context")
 	}
 }
+
+func TestTextReadShowsSnapshotProgress(t *testing.T) {
+	var out bytes.Buffer
+	err := renderText(&out, protocol.Success("tab", map[string]any{
+		"observation": "o1", "text": "More content", "offset": 40, "textBytes": 100,
+		"truncated": true, "next": protocol.Invocation{Command: "read", Flags: map[string]string{"offset": "52"}},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{"observation=o1", "offset=40", "textBytes=100", "More content", "next="} {
+		if !strings.Contains(out.String(), part) {
+			t.Fatalf("read text lost %q: %s", part, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "title=") || strings.Contains(out.String(), "url=") {
+		t.Fatalf("snapshot read pretends to be a fresh observation: %s", out.String())
+	}
+}
+
+func TestTextTreeQuotesShadowHostIDs(t *testing.T) {
+	var result any
+	if err := json.Unmarshal([]byte(`{"observation":"o1","elements":[{"ref":"o1:e1","role":"button","name":"Go","shadow":[{"host":"x-host#id\nFORGED MARKER","mode":"closed"}]}]}`), &result); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := renderText(&out, protocol.Success("tab", result)); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "\nFORGED MARKER") || !strings.Contains(out.String(), `id\nFORGED MARKER`) {
+		t.Fatalf("shadow host injected a structural line: %s", out.String())
+	}
+}
