@@ -43,7 +43,7 @@ type tab struct {
 	session      string // Guarded by mu; shared with the browser event reader.
 	mu           sync.Mutex
 	dead         bool
-	observations map[string]*observation
+	observations map[string][]*observation
 	queue        []*job
 	wake         chan struct{}
 }
@@ -135,7 +135,7 @@ func (b *browser) event(e transport.Event) {
 		if t := b.tabs[p.TargetID]; t != nil {
 			t.mu.Lock()
 			t.dead = true
-			t.observations = map[string]*observation{}
+			t.observations = map[string][]*observation{}
 			t.mu.Unlock()
 		}
 		return
@@ -146,7 +146,7 @@ func (b *browser) event(e transport.Event) {
 	for _, t := range b.tabs {
 		t.mu.Lock()
 		if t.session == e.Session {
-			t.observations = map[string]*observation{}
+			t.observations = map[string][]*observation{}
 			if e.Method == "Inspector.detached" {
 				t.dead = true
 			}
@@ -160,7 +160,7 @@ func (b *browser) getTab(id string) *tab {
 	if t := b.tabs[id]; t != nil {
 		return t
 	}
-	t := &tab{id: id, browser: b, wake: make(chan struct{}, 1), observations: map[string]*observation{}}
+	t := &tab{id: id, browser: b, wake: make(chan struct{}, 1), observations: map[string][]*observation{}}
 	b.tabs[id] = t
 	go t.worker()
 	return t
@@ -290,7 +290,8 @@ func (t *tab) do(ctx context.Context, fn func(context.Context) (any, error), may
 	return await(ctx, j)
 }
 
-func (c *Controller) Handle(ctx context.Context, r protocol.Request) protocol.Response {
+func (c *Controller) Handle(ctx context.Context, r protocol.Request) (response protocol.Response) {
+	defer func() { response = recovery(r, response) }()
 	if r.Browser == "" {
 		r.Browser = "default"
 	}
@@ -303,34 +304,26 @@ func (c *Controller) Handle(ctx context.Context, r protocol.Request) protocol.Re
 	if ctx.Err() != nil {
 		return protocol.Failure("", ctx.Err())
 	}
-	if r.Command == "connect" || r.Command == "disconnect" {
+	if r.Command == "connect" || r.Command == "reconnect" || r.Command == "disconnect" {
 		return c.connection(ctx, r)
 	}
 	if r.Command == "controller stop" {
 		return protocol.Success("", map[string]any{"stopped": true})
 	}
-	c.mu.Lock()
-	b := c.browsers[r.Browser]
+	if r.Command == "browsers" {
+		aliases, more := c.aliases()
+		return protocol.Success("", map[string]any{"browsers": aliases, "truncated": more})
+	}
 	if r.Command == "status" || r.Command == "doctor" {
-		selected := c.selections[selection(r)]
-		c.mu.Unlock()
-		connected := false
-		if b != nil {
-			select {
-			case <-b.client.Done:
-			default:
-				connected = true
-			}
-		}
-		result := map[string]any{"version": protocol.Version, "epoch": c.Epoch, "browser": r.Browser, "context": r.Context, "connected": connected, "selectedTab": selected}
-		if r.Command == "doctor" {
-			result["checks"] = map[string]any{"controller": true, "cdp": connected}
-			if !connected {
-				result["next"] = "connect --endpoint URL"
-			}
+		result, err := c.diagnostics(ctx, r)
+		if err != nil {
+			return protocol.Failure("", err)
 		}
 		return protocol.Success("", result)
 	}
+	c.mu.Lock()
+	b := c.browsers[r.Browser]
+
 	if b == nil {
 		c.mu.Unlock()
 		return protocol.Failure("", protocol.Fail("NO_BROWSER", "Browser alias is not connected; use connect --endpoint URL"))
@@ -406,7 +399,17 @@ func (c *Controller) connection(ctx context.Context, r protocol.Request) protoco
 	if name == "" {
 		name = r.Browser
 	}
-	b := &browser{endpoint: r.Flags["endpoint"], tabs: map[string]*tab{}}
+	endpoint := r.Flags["endpoint"]
+	if r.Command == "reconnect" {
+		c.mu.Lock()
+		remembered := c.browsers[name]
+		c.mu.Unlock()
+		if remembered == nil {
+			return protocol.Failure("", protocol.Fail("NO_BROWSER", "No endpoint remembered for this alias; use connect --endpoint URL"))
+		}
+		endpoint = remembered.endpoint
+	}
+	b := &browser{endpoint: endpoint, tabs: map[string]*tab{}}
 	client, err := transport.Dial(ctx, b.endpoint, b.event)
 	if err != nil {
 		return protocol.Failure("", err)
@@ -427,7 +430,7 @@ func (c *Controller) connection(ctx context.Context, r protocol.Request) protoco
 	if old != nil {
 		old.client.Close()
 	}
-	return protocol.Success("", map[string]any{"browser": name, "connected": true, "epoch": c.Epoch})
+	return protocol.Success("", map[string]any{"browser": name, "connected": true, "epoch": c.Epoch, "next": "tabs then tab use ID; use --browser " + name + " for this alias", "nextCommand": protocol.Invocation{Command: "tabs", Flags: map[string]string{"browser": name, "context": r.Context}}})
 }
 func (c *Controller) browserCommand(ctx context.Context, b *browser, r protocol.Request) (any, error) {
 	if r.Command == "call" {
@@ -533,7 +536,7 @@ func (c *Controller) browserCommand(ctx context.Context, b *browser, r protocol.
 		if r.Command == "tab close" {
 			t.mu.Lock()
 			t.dead = true
-			t.observations = map[string]*observation{}
+			t.observations = map[string][]*observation{}
 			t.mu.Unlock()
 		}
 		return map[string]any{"id": id, "effect": "confirmed"}, nil

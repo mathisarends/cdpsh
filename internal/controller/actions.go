@@ -34,6 +34,12 @@ func (c *Controller) execute(ctx context.Context, t *tab, r protocol.Request) (a
 		return out, nil
 	case "observe":
 		return c.observe(ctx, t, r)
+	case "read":
+		return c.read(ctx, t, r)
+	case "options":
+		return c.options(ctx, t, r)
+	case "focus", "check", "select":
+		return c.control(ctx, t, r)
 	case "goto", "back", "forward", "reload":
 		return c.navigate(ctx, t, r)
 	case "click":
@@ -89,23 +95,28 @@ func (t *tab) actionable(ctx context.Context, r protocol.Request) (runtime.Remot
 	if err != nil {
 		return "", layout{}, err
 	}
+	l, err := t.actionableObject(ctx, id)
+	return id, l, err
+}
+
+func (t *tab) actionableObject(ctx context.Context, id runtime.RemoteObjectID) (layout, error) {
 	l, err := t.layout(ctx, id, true, true)
 	if err != nil {
-		return "", l, protocol.Effect(err, "possible")
+		return l, protocol.Effect(err, "possible")
 	}
 	if !l.Connected {
-		return "", l, &protocol.Error{Code: "STALE_REF", Message: "Target was removed", Effect: "possible", Next: "observe"}
+		return l, &protocol.Error{Code: "STALE_REF", Message: "Target was removed", Effect: "possible", Next: "observe"}
 	}
 	if !l.Visible || !l.Viewport {
-		return "", l, protocol.Fail("NOT_VISIBLE", "Target is not visible")
+		return l, protocol.Fail("NOT_VISIBLE", "Target is not visible")
 	}
 	if l.Disabled {
-		return "", l, protocol.Fail("DISABLED", "Target is disabled")
+		return l, protocol.Fail("DISABLED", "Target is disabled")
 	}
 	if l.Obscured {
-		return "", l, protocol.Fail("OBSCURED", "Target is covered by another element")
+		return l, protocol.Fail("OBSCURED", "Target is covered by another element")
 	}
-	return id, l, nil
+	return l, nil
 }
 func (c *Controller) click(ctx context.Context, t *tab, r protocol.Request) (any, error) {
 	if _, err := t.checkFrame(ctx, r); err != nil {
@@ -131,13 +142,8 @@ func (c *Controller) click(ctx context.Context, t *tab, r protocol.Request) (any
 		}
 		x, y = l.X, l.Y
 	}
-	for _, kind := range []string{"mousePressed", "mouseReleased"} {
-		if err := t.call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": kind, "x": x, "y": y, "button": "left", "clickCount": 1}, nil); err != nil {
-			cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			_ = t.call(cleanup, "Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1}, nil)
-			return nil, protocol.Effect(err, "possible")
-		}
+	if err := t.dispatchClick(ctx, x, y); err != nil {
+		return nil, err
 	}
 	return map[string]any{"effect": "confirmed"}, nil
 }
@@ -147,9 +153,9 @@ func (c *Controller) fill(ctx context.Context, t *tab, r protocol.Request) (any,
 		return nil, err
 	}
 	if !l.Editable {
-		return nil, protocol.Fail("NOT_EDITABLE", "Target is not a supported editable input or textarea")
+		return nil, protocol.Fail("NOT_EDITABLE", "Target is not a supported editable input, textarea or contenteditable")
 	}
-	if _, err = t.function(ctx, id, `function(){this.focus();this.select();return true}`); err != nil {
+	if _, err = t.function(ctx, id, fillFocusJS); err != nil {
 		return nil, protocol.Effect(err, "possible")
 	}
 	if r.Payload == "" {
@@ -160,7 +166,7 @@ func (c *Controller) fill(ctx context.Context, t *tab, r protocol.Request) (any,
 	if err != nil {
 		return nil, protocol.Effect(err, "possible")
 	}
-	value, err := t.function(ctx, id, `function(){return this.value}`)
+	value, err := t.function(ctx, id, `function(){return this.isContentEditable?this.innerText:this.value}`)
 	if err != nil {
 		return nil, protocol.Effect(err, "possible")
 	}
@@ -423,7 +429,7 @@ func (c *Controller) navigate(ctx context.Context, t *tab, r protocol.Request) (
 		return nil, protocol.Effect(err, "possible")
 	}
 	t.mu.Lock()
-	t.observations = map[string]*observation{}
+	t.observations = map[string][]*observation{}
 	t.mu.Unlock()
 	state := r.Flags["state"]
 	if state == "" {

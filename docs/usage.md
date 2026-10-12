@@ -38,36 +38,48 @@ cdp click --ref OBSERVATION_ID:e1
 cdp wait --css '#result' --state visible
 ```
 
-Read the actual reference from the preceding JSON. A new observation replaces
-references for that context and tab. Navigation, removed elements, a reconnect,
-or a controller restart invalidate references. CSS and role/name selectors must
+Read the actual reference from the preceding JSON. The latest three observations
+retain references and captured text for that context and tab. Navigation, removed
+elements, a reconnect or a controller restart invalidate references. CSS and
+role/name selectors must
 match exactly one element; names use exact matching. `--frame` explicitly supports
 the main frame. Observations list child frames with `supported:false`; use raw CDP
-or viewport coordinates for them. Open shadow DOM elements are accessible through
-AX references and role/name; CSS selectors use the main document's querySelectorAll.
+or viewport coordinates for them. Nested open/closed author shadow DOM elements
+are accessible through references and AX role/name; CSS selectors use the main
+document's querySelectorAll.
 
-`fill` replaces supported text/email/password/search/tel/url inputs or textareas,
-sends native input, and verifies the value. `type` inserts text at the current
+`fill` replaces supported text/email/password/search/tel/url inputs, textareas or
+contenteditable surfaces, sends browser input, and verifies the value. `type`
+inserts text at the current
 focus. `press` sends keyboard events, e.g. `Ctrl+A`, `Enter`, or `Shift+Tab`.
-Number, date, file, contenteditable and custom editors have no high-level fill
-contract in this release. Scrolling uses the DOM scrolling APIs; clicks always
-use CDP input after visibility, enabled-state and hit-test checks.
+Number, date and file inputs have no high-level fill contract. Custom editors
+may reject or transform input, producing a verification error with a possible effect.
+`focus TARGET` verifies focus, including within closed roots. `check TARGET --checked
+true|false` sets a checkbox/switch/radio state; `select TARGET --value VALUE`,
+`--label LABEL` or `--index N` selects one option in a native single select.
+`options TARGET` lists options with continuation; observations include the first
+five. Matching states are no-ops without scrolling; both actions verify their
+result. Scrolling uses
+the DOM scrolling APIs; clicks use CDP input after visibility, enabled-state and
+hit-test checks.
 
 ## Commands and discovery
 
 `help` provides the overview; `help click` and `schema fill` expose focused usage
 and machine-readable contracts. Global flags can appear before or after commands.
-Use `--format text` for readable observations. JSON remains the automation format.
+Use `--format text` for a compact tree with semantic groups, shadow boundaries,
+live state and scroll context. `help` includes examples; `schema` includes typed
+input/result JSON Schemas and command-specific constraints. JSON remains the automation format.
 
 `tabs` is bounded as well; use its `next` hint (`tabs --offset N`) to continue.
 
 | Area | Commands |
 | --- | --- |
-| Connection | `connect`, `disconnect`, `status`, `doctor` |
+| Connection | `connect`, `reconnect`, `disconnect`, `browsers`, `status`, `doctor` |
 | Tabs | `tabs`, `tab new/use/activate/close` |
 | Navigation | `goto`, `back`, `forward`, `reload`, `info` |
-| Observation | `observe`, `screenshot` |
-| Input | `click`, `fill`, `type`, `press`, `scroll` |
+| Observation | `observe`, `read`, `options`, `screenshot` |
+| Input | `click`, `fill`, `focus`, `check`, `select`, `type`, `press`, `scroll` |
 | Synchronization | `wait` |
 | Escape hatches | `eval`, `call` |
 | Local lifecycle | `controller stop`, `version` |
@@ -86,7 +98,8 @@ cdp call Browser.getVersion --scope browser
 Contexts retain independent tab selections. `--tab` overrides selection only for
 one invocation. Contexts share the browser's cookies and permissions. Selection
 does not activate the visible browser tab; `tab activate ID` does that explicitly.
-Actions and reads are ordered per tab; explicit waits allow later actions to run.
+Actions and reads are ordered per tab within a browser alias; explicit waits
+allow later actions to run.
 
 Chrome 155 in headless mode can stall screenshot capture for a hidden tab. Use
 `tab activate ID` explicitly before a screenshot in that case. A screenshot timeout
@@ -105,8 +118,9 @@ to `{}` and must be a JSON object. Input payloads are limited to 4 MiB.
 
 `effect` reports the technical browser operation: `none`, `possible`, or
 `confirmed`. A dispatched click does not confirm business success. On `possible`,
-inspect the page before retrying. Reconnect explicitly with `connect`; there is
-no automatic target substitution or mutation replay. `status` reports the
+inspect the page before retrying. Reconnect explicitly with `reconnect` using the
+remembered endpoint, or `connect`; there is no automatic target substitution or
+mutation replay. `status` reports the
 controller epoch. Connections and references live in memory, not in profile files.
 
 Actions and waits default to 10 seconds; navigation and connect to 30 seconds.
@@ -117,6 +131,13 @@ an explicit element/URL wait or JavaScript check. `networkidle` is unsupported.
 Observations default to 60 elements and a **12 KiB total JSON response budget**.
 Use `--limit 100 --max-bytes 24000`, with maximums of 500 elements and 64 KiB.
 Truncation is explicit, and strings are bounded without breaking UTF-8 or JSON.
+Text has no fixed 2 KiB ceiling. `continuation.text` and `read --observation ID
+--offset N` return more text from the same captured observation without evicting
+references. `continuation.elements` gives an `observe --offset N` invocation for
+more targets, including beyond 500 elements. Viewport scope applies to rendered
+text and targets; page scope also includes text reachable in scroll containers.
+`framesTruncated` and `continuation.frames` expose complete frame discovery when
+the compact list is bounded. See the [agent observation contract](agent-observations.md).
 Large eval/CDP values are saved losslessly to JSON files. Screenshots are PNG files.
 Results give absolute paths, byte sizes and media types; no Base64 is printed.
 Existing output files require `--overwrite`. Password values are not echoed by
@@ -145,7 +166,11 @@ stop` stops the local controller. Both leave browser tabs open.
 | `CDPSH_HOME` | User cache directory + `cdpsh`; controller/artifact directory |
 
 Flags override environment defaults. Browser aliases are registered by
-`connect --endpoint URL --name ALIAS`. Select them with `--browser ALIAS`.
+`connect --endpoint URL --name ALIAS`. Select them with `--browser ALIAS`;
+registration does not change the default alias.
+`nextCommand` preserves the registered alias, and `browsers` lists registrations.
+`doctor` works without a controller and probes CDP and the selected tab when connected.
+Error `recovery` and continuation objects preserve browser, context and tab flags.
 No telemetry or persistent page-content logs are enabled.
 
 ## Development and verification

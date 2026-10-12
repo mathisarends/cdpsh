@@ -194,8 +194,13 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 		t.Fatal("native click did not run the handler")
 	}
 	old := email
-	obs = alpha("observe")
+	ok(t, alpha("observe"))
+	ok(t, alpha("click", "--ref", old))
+	for i := 0; i < 3; i++ {
+		ok(t, alpha("observe"))
+	}
 	code(t, alpha("click", "--ref", old), "STALE_REF")
+	obs = alpha("observe")
 	// A new observation in another context does not expire alpha's references.
 	ok(t, h.call("--context", "gamma", "tab", "use", a))
 	ok(t, h.call("--context", "gamma", "observe"))
@@ -327,6 +332,8 @@ func TestBlankBrowserAcceptance(t *testing.T) {
 		t.Fatal("input replayed after disconnect")
 	}
 	ok(t, h.call("doctor"))
+	testErgonomics(t, h)
+	testReviewRegressions(t, h)
 	t.Logf("Blank-profile Chrome acceptance passed; controller epoch %s; screenshot %s", fmt.Sprint(epoch), shot)
 }
 

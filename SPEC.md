@@ -1,7 +1,31 @@
 # cdp — Specification
 
-Status: v0.1 implemented; see README.md for verification and supported limits.
-Updated: October 11, 2026.
+Status: v0.2 implemented. The original v0.1 design follows; the v0.2 amendments
+below supersede its reference lifetime, observation and command contracts. See
+README.md and docs/agent-observations.md for current behavior.
+
+## v0.2 amendments
+
+- Observations combine pierced DOM, AX semantics and layout snapshots. They expose
+  live states, semantic context, open/closed author shadow paths and scroll metadata.
+  Viewport scope applies to targets and rendered text, including long text nodes.
+- Three observations per context/tab retain references and immutable rendered text.
+  Navigation, node loss, reconnect and controller restart still invalidate identity.
+- `read --observation ID --offset N` provides bounded UTF-8 text continuation;
+  `observe --offset N` provides element continuation. Structured invocations retain
+  browser/context/tab and avoid shell interpolation of page-controlled values.
+- Added `focus`, idempotent verified `check` and native single-select `select`;
+  `fill` also supports contenteditable surfaces through browser input.
+- Native selects expose their first five options; `options` provides bounded
+  continuation and `select --index N` addresses duplicate or truncated options.
+- Added explicit `reconnect` using the remembered endpoint and `browsers`. `doctor`
+  reports missing controllers and probes browser/selected-target availability.
+- Focused help includes examples; schema output has typed JSON Schemas, defaults,
+  ranges and command-specific constraints/errors.
+- Child-frame high-level actions remain unsupported and are explicitly surfaced.
+  No full browser-use parity, browser hosting or automatic action replay is claimed.
+
+Updated: October 12, 2026.
 
 cdp is a lightweight browser CLI written in Go for agents. It connects to an
 existing Chromium browser through the Chrome DevTools Protocol (CDP) and provides
@@ -202,7 +226,7 @@ e3 button "Sign in"
 
 References include the observation in the target: `o7:e3`. They are bound to the
 browser, controller epoch, tab, frame, and document; they are never global IDs.
-A new `observe` replaces that context's references for the relevant tab.
+As amended in v0.2, the latest three observations retain references for that context and tab.
 Navigation, frame loss, and reconnects also invalidate affected references.
 A referenced target is checked for existence and usability before each action.
 DOM changes can also cause `STALE_REF` or an actionability error; there is no
