@@ -24,6 +24,9 @@ type Flag struct {
 	Type        string   `json:"type"`
 	Description string   `json:"description"`
 	Choices     []string `json:"choices,omitempty"`
+	Default     any      `json:"default,omitempty"`
+	Minimum     *float64 `json:"minimum,omitempty"`
+	Maximum     *float64 `json:"maximum,omitempty"`
 }
 type Definition struct {
 	Summary string          `json:"summary"`
@@ -53,6 +56,13 @@ var globals = map[string]Flag{
 func Definitions() map[string]Definition {
 	m := map[string]Definition{
 		"connect":         {"Connect to an existing Chromium browser; never launches a browser", "connect --endpoint URL [--name NAME]", flags("endpoint", "HTTP discovery or browser WebSocket URL", "name", "Browser alias to register"), 0, 0, "browser, connected, epoch"},
+		"reconnect":       {"Reconnect the chosen alias using its remembered endpoint; no actions replayed", "reconnect", flags(), 0, 0, "browser, connected, epoch, next"},
+		"browsers":        {"List registered browser aliases without exposing endpoints", "browsers", flags(), 0, 0, "browsers: [{name,connected}]"},
+		"read":            {"Read another UTF-8 text page from a retained observation without changing references", "read --observation ID [--offset N] [--max-bytes N]", flags("observation", "Observation ID from observe", "offset", "UTF-8 byte offset; default 0", "max-bytes", "Total JSON response budget; default 12288, range 2048..65536"), 0, 0, "observation, text, offset, textBytes, truncated, next?"},
+		"focus":           {"Focus an explicit target and verify focus, including shadow DOM", "focus TARGET", flags(), 0, 1, "effect, verified"},
+		"check":           {"Set a checkbox/switch/radio state and verify it; matching states are a no-op", "check TARGET --checked true|false", map[string]Flag{"checked": choice("Required desired checked state", "true", "false")}, 0, 1, "effect, verified, checked"},
+		"select":          {"Select one enabled option in a native single select and verify it", "select TARGET (--value VALUE | --label LABEL | --index N)", flags("value", "Exact option value, including empty string", "label", "Exact option label", "index", "Zero-based option index from observe/options"), 0, 1, "effect, verified"},
+		"options":         {"List bounded native select options without changing selection", "options TARGET [--offset N] [--limit N] [--max-bytes N]", flags("offset", "Skip this many options; default 0", "limit", "Option limit; default 60, maximum 500", "max-bytes", "Total response budget; default 12288, range 2048..65536"), 0, 1, "options, total, truncated, next?"},
 		"disconnect":      {"Disconnect CDP and leave all browser tabs open", "disconnect", flags(), 0, 0, "disconnected"},
 		"status":          {"Controller epoch, connection and selected tab", "status", flags(), 0, 0, "version, epoch, browser, context, connected, selectedTab"},
 		"doctor":          {"Focused controller and CDP diagnostics", "doctor", flags(), 0, 0, "status fields, checks, next"},
@@ -66,9 +76,9 @@ func Definitions() map[string]Definition {
 		"forward":         {"Navigate forward in history", "forward [--state domcontentloaded|load]", flags(), 0, 0, "state, effect"},
 		"reload":          {"Reload and wait for the new document", "reload [--state domcontentloaded|load]", flags(), 0, 0, "state, effect"},
 		"info":            {"Read URL, title, document readiness", "info", flags(), 0, 0, "url, title, state, truncated"},
-		"observe":         {"Bounded accessibility/DOM observation with fresh context-local references", "observe [--scope viewport|page] [--role ROLE] [--name NAME] [--limit N] [--max-bytes N]", flags("role", "Exact accessibility role filter", "name", "Exact accessible name filter", "limit", "Element limit; default 60, maximum 500", "max-bytes", "Serialized response budget; default 12288, range 2048..65536"), 0, 0, "observation, url, title, elements, text, frames, truncated, next"},
+		"observe":         {"Bounded accessibility/DOM observation with references retained for the latest three snapshots", "observe [--scope viewport|page] [--role ROLE] [--name NAME] [--limit N] [--max-bytes N]", flags("offset", "Skip this many matching visible elements; default 0", "role", "Exact accessibility role filter", "name", "Exact accessible name filter", "limit", "Element limit; default 60, maximum 500", "max-bytes", "Serialized response budget; default 12288, range 2048..65536"), 0, 0, "observation, url, title, elements, text, frames, truncated, next"},
 		"click":           {"Hit-test then dispatch a click; verify task success separately", "click TARGET | click --x X --y Y", flags("x", "CSS viewport X", "y", "CSS viewport Y"), 0, 1, "effect"},
-		"fill":            {"Replace an input/textarea value using native input and verify it; never echoes text", "fill TARGET (--text TEXT | --text-file PATH)", flags("text", "Replacement text", "text-file", "UTF-8 file or - for stdin"), 0, 1, "effect, verified"},
+		"fill":            {"Replace text in an input, textarea or contenteditable using browser input and verify it; never echoes text", "fill TARGET (--text TEXT | --text-file PATH)", flags("text", "Replacement text", "text-file", "UTF-8 file or - for stdin"), 0, 1, "effect, verified"},
 		"type":            {"Insert text at the current focus; use press for keyboard events", "type (--text TEXT | --text-file PATH)", flags("text", "Text to insert", "text-file", "UTF-8 file or - for stdin"), 0, 0, "effect"},
 		"press":           {"Send one key or modifier combination; best-effort release on failure", "press KEY", flags(), 1, 1, "effect"},
 		"scroll":          {"Scroll a target area or the viewport by CSS pixels", "scroll --dy PIXELS [--dx PIXELS] [TARGET]", flags("dy", "Vertical CSS pixel delta", "dx", "Horizontal CSS pixel delta"), 0, 1, "effect"},
@@ -86,12 +96,12 @@ func Definitions() map[string]Definition {
 		d.Flags["state"] = choice("Navigation readiness; default domcontentloaded", "domcontentloaded", "load")
 		m[name] = d
 	}
-	for _, name := range []string{"observe", "click", "fill", "type", "press", "scroll", "wait", "eval"} {
+	for _, name := range []string{"observe", "click", "fill", "focus", "check", "select", "options", "type", "press", "scroll", "wait", "eval"} {
 		d := m[name]
 		d.Flags["frame"] = stringFlag("Frame ID; main frame supported, child frames explicitly unsupported")
 		m[name] = d
 	}
-	for _, name := range []string{"click", "fill", "scroll", "wait"} {
+	for _, name := range []string{"click", "fill", "focus", "check", "select", "options", "scroll", "wait"} {
 		d := m[name]
 		d.Flags["ref"] = stringFlag("Fresh observation reference, e.g. oID:e1")
 		d.Flags["role"] = stringFlag("Exact accessibility role")
@@ -108,7 +118,7 @@ func Definitions() map[string]Definition {
 	d = m["wait"]
 	d.Flags["state"] = choice("Explicit readiness or target condition", "domcontentloaded", "load", "visible", "hidden", "enabled")
 	m["wait"] = d
-	return m
+	return enrichDefinitions(m)
 }
 func parse(args []string) (protocol.Request, string, error) {
 	r := protocol.Request{Flags: map[string]string{}, Browser: os.Getenv("CDPSH_BROWSER"), Context: os.Getenv("CDPSH_CONTEXT")}
@@ -222,7 +232,7 @@ func parse(args []string) (protocol.Request, string, error) {
 	if len(r.Args) < d.Min || len(r.Args) > d.Max {
 		return r, format, protocol.Fail("INVALID_ARGUMENT", "Usage: "+d.Usage)
 	}
-	if (r.Command == "click" || r.Command == "fill" || r.Command == "scroll" || r.Command == "wait") && len(r.Args) == 1 {
+	if (targetCommand(r.Command)) && len(r.Args) == 1 {
 		if r.Flags["ref"] != "" {
 			return r, format, protocol.Fail("INVALID_ARGUMENT", "Provide only one reference")
 		}
@@ -230,7 +240,7 @@ func parse(args []string) (protocol.Request, string, error) {
 		r.Args = nil
 	}
 	has := func(k string) bool { _, ok := r.Flags[k]; return ok }
-	if r.Command == "click" || r.Command == "fill" || r.Command == "scroll" || r.Command == "wait" {
+	if targetCommand(r.Command) {
 		targets := 0
 		for _, k := range []string{"ref", "role", "css"} {
 			if has(k) {
@@ -249,7 +259,7 @@ func parse(args []string) (protocol.Request, string, error) {
 			}
 			targets++
 		}
-		if targets > 1 || ((r.Command == "click" || r.Command == "fill") && targets != 1) {
+		if targets > 1 || ((r.Command != "scroll" && r.Command != "wait") && targets != 1) {
 			return r, format, protocol.Fail("INVALID_ARGUMENT", "Use exactly one target: --ref, --role/--name, --css, or click coordinates")
 		}
 		if r.Command == "wait" {
@@ -273,6 +283,21 @@ func parse(args []string) (protocol.Request, string, error) {
 	}
 	if r.Command == "scroll" && !has("dy") {
 		return r, format, protocol.Fail("INVALID_ARGUMENT", "scroll requires --dy")
+	}
+	if r.Command == "read" && (!has("observation") || r.Flags["observation"] == "") {
+		return r, format, protocol.Fail("INVALID_ARGUMENT", "read requires --observation ID from observe")
+	}
+	if r.Command == "check" && !has("checked") {
+		return r, format, protocol.Fail("INVALID_ARGUMENT", "check requires --checked true|false")
+	}
+	sources := 0
+	for _, key := range []string{"value", "label", "index"} {
+		if has(key) {
+			sources++
+		}
+	}
+	if r.Command == "select" && sources != 1 {
+		return r, format, protocol.Fail("INVALID_ARGUMENT", "select requires exactly one of --value, --label or --index")
 	}
 	if r.Command == "connect" {
 		if !has("endpoint") {
@@ -306,15 +331,25 @@ func parse(args []string) (protocol.Request, string, error) {
 			}
 		}
 	}
+	if has("index") {
+		n, e := strconv.Atoi(r.Flags["index"])
+		if e != nil || n < 0 || n > 2147483647 {
+			return r, format, protocol.Fail("INVALID_ARGUMENT", "--index must be a nonnegative integer up to 2147483647")
+		}
+	}
 	if has("offset") {
 		n, e := strconv.Atoi(r.Flags["offset"])
-		if e != nil || n < 0 || n > 1000000 {
-			return r, format, protocol.Fail("INVALID_ARGUMENT", "--offset must be an integer in 0..1000000")
+		maxOffset := 1000000
+		if r.Command == "read" {
+			maxOffset = 2147483647
+		}
+		if e != nil || n < 0 || n > maxOffset {
+			return r, format, protocol.Fail("INVALID_ARGUMENT", fmt.Sprintf("--offset must be an integer in 0..%d", maxOffset))
 		}
 	}
 	timeout := 10 * time.Second
 	switch r.Command {
-	case "connect", "goto", "back", "forward", "reload":
+	case "connect", "reconnect", "goto", "back", "forward", "reload":
 		timeout = 30 * time.Second
 	}
 	if s := r.Flags["timeout"]; s != "" {
@@ -402,19 +437,22 @@ func help(command string, schema bool) protocol.Response {
 		for _, name := range names {
 			commands = append(commands, map[string]string{"command": name, "summary": defs[name].Summary})
 		}
-		return protocol.Success("", map[string]any{"version": protocol.Version, "usage": "cdp [--browser NAME] [--context NAME] [--tab ID] COMMAND [FLAGS]", "commands": commands, "next": "help COMMAND or schema COMMAND"})
+		return protocol.Success("", map[string]any{"version": protocol.Version, "usage": "cdp [--browser NAME] [--context NAME] [--tab ID] COMMAND [FLAGS]", "commands": commands, "workflow": []string{"connect --endpoint URL", "tabs", "tab use ID", "observe", "fill --ref REF --text TEXT", "click --ref REF", "observe"}, "next": "help COMMAND or schema COMMAND"})
 	}
 	d, ok := defs[command]
 	if !ok {
 		return protocol.Failure("", protocol.Fail("INVALID_ARGUMENT", "Unknown help/schema command"))
 	}
-	result := map[string]any{"command": command, "definition": d, "globals": globals}
+	result := map[string]any{"command": command, "definition": d, "globals": globals, "examples": commandExamples(command)}
 	if schema {
-		result["constraints"] = []string{"One command and one JSON response per invocation", "A target is one of ref, role/name, CSS, or click coordinates", "Role/name and CSS require exactly one match; names are exact", "Text/eval input requires exactly one source; - means stdin", "References expire on new observations in their context, navigation or reconnect", "Child frame high-level operations are unsupported; use CDP/coordinates", "A confirmed input effect does not establish task success", "CDPSH_HOME selects controller and artifact directory"}
-		result["response"] = map[string]any{"ok": "boolean", "tab": "optional string", "result": "command result on success", "error": "{code,message,effect:none|possible|confirmed,next?,details?}"}
-		result["errors"] = []string{"INVALID_ARGUMENT", "NO_BROWSER", "NO_TAB", "TAB_CLOSED", "STALE_REF", "TARGET_NOT_FOUND", "AMBIGUOUS_TARGET", "OBSCURED", "NOT_EDITABLE", "NOT_VISIBLE", "DISABLED", "TIMEOUT", "CONNECTION_LOST", "EXECUTION_ERROR", "UNSUPPORTED", "PROTOCOL_ERROR", "CONTROLLER_ERROR"}
+		result["inputSchema"] = inputSchema(command, d)
+		result["resultSchema"] = resultSchema(command)
+		result["constraints"] = commandConstraints(command)
+		result["response"] = map[string]any{"ok": "boolean", "tab": "optional string", "result": "command result on success", "error": "{code,message,effect:none|possible|confirmed,next?,recovery?,details?}"}
+		result["errors"] = commandErrors(command)
 		result["exitCodes"] = map[string]int{"success": 0, "internal/execution/protocol": 1, "arguments": 2, "target/page state": 3, "timeout": 4, "connection/controller": 5}
 	}
+
 	return protocol.Success("", result)
 }
 func Run(args []string, in io.Reader, out, stderr io.Writer) int {
@@ -471,34 +509,111 @@ func Run(args []string, in io.Reader, out, stderr io.Writer) int {
 func renderText(out io.Writer, r protocol.Response) error {
 	if !r.OK {
 		_, err := fmt.Fprintf(out, "%s: %s (effect=%s)\n", r.Error.Code, r.Error.Message, r.Error.Effect)
+		if err != nil {
+			return err
+		}
+		if r.Error.Recovery != nil {
+			b, _ := json.Marshal(r.Error.Recovery)
+			_, err = fmt.Fprintf(out, "recovery=%s\n", b)
+		} else if r.Error.Next != "" {
+			_, err = fmt.Fprintf(out, "next=%s\n", r.Error.Next)
+		}
 		return err
 	}
 	b, _ := json.Marshal(r.Result)
 	var obs struct {
-		Observation string        `json:"observation"`
-		Title       string        `json:"title"`
-		Elements    []elementText `json:"elements"`
-		Text        string        `json:"text"`
-		Truncated   bool          `json:"truncated"`
+		Observation  string                         `json:"observation"`
+		URL          string                         `json:"url"`
+		Title        string                         `json:"title"`
+		Elements     []map[string]any               `json:"elements"`
+		Text         string                         `json:"text"`
+		Truncated    bool                           `json:"truncated"`
+		Viewport     map[string]any                 `json:"viewport"`
+		Frames       []map[string]any               `json:"frames"`
+		Continuation map[string]protocol.Invocation `json:"continuation"`
+		Next         any                            `json:"next"`
 	}
 	_ = json.Unmarshal(b, &obs)
-	if obs.Observation != "" {
-		var text strings.Builder
-		fmt.Fprintf(&text, "tab=%s observation=%s title=%q\n", r.Tab, obs.Observation, obs.Title)
-		for _, e := range obs.Elements {
-			fmt.Fprintf(&text, "%s %s %q\n", e.Ref, e.Role, e.Name)
-		}
-		if obs.Text != "" {
-			fmt.Fprintln(&text, obs.Text)
-		}
-		if obs.Truncated {
-			fmt.Fprintln(&text, "[truncated; narrow filters or increase limits]")
-		}
-		_, err := io.WriteString(out, text.String())
+	if obs.Observation == "" {
+		_, err := fmt.Fprintln(out, string(b))
 		return err
 	}
-	_, err := fmt.Fprintln(out, string(b))
+	var text strings.Builder
+	fmt.Fprintf(&text, "tab=%s observation=%s title=%q url=%q\n", r.Tab, obs.Observation, obs.Title, obs.URL)
+	if obs.Viewport != nil {
+		fmt.Fprintf(&text, "viewport=%vx%v scroll=%v,%v above=%vpx below=%vpx\n", obs.Viewport["width"], obs.Viewport["height"], obs.Viewport["x"], obs.Viewport["y"], obs.Viewport["above"], obs.Viewport["below"])
+	}
+	previous := ""
+	for _, e := range obs.Elements {
+		context, _ := json.Marshal(e["context"])
+		shadow, _ := json.Marshal(e["shadow"])
+		ancestry := string(context) + string(shadow)
+		depth := 0
+		if groups, ok := e["context"].([]any); ok {
+			depth += len(groups)
+		}
+		if shadows, ok := e["shadow"].([]any); ok {
+			depth += len(shadows)
+		}
+		if ancestry != previous {
+			level := 0
+			shadowLevel := 0
+			shadows, _ := e["shadow"].([]any)
+			printShadow := func() {
+				item := shadows[shadowLevel].(map[string]any)
+				fmt.Fprintf(&text, "%s|SHADOW(%s)| %s\n", strings.Repeat("  ", level), item["mode"], item["host"])
+				level++
+				shadowLevel++
+			}
+			if groups, ok := e["context"].([]any); ok {
+				for _, g := range groups {
+					item := g.(map[string]any)
+					shadowDepth, _ := item["shadowDepth"].(float64)
+					for shadowLevel < len(shadows) && shadowLevel < int(shadowDepth) {
+						printShadow()
+					}
+					name, _ := item["name"].(string)
+					fmt.Fprintf(&text, "%s%s %q\n", strings.Repeat("  ", level), item["role"], name)
+					level++
+				}
+			}
+			for shadowLevel < len(shadows) {
+				printShadow()
+			}
+			previous = ancestry
+		}
+		marker := ""
+		if e["new"] == true {
+			marker = "*"
+		}
+		fmt.Fprintf(&text, "%s%s[%s] %s %q", strings.Repeat("  ", depth), marker, e["ref"], e["role"], e["name"])
+		for _, key := range []string{"inferred", "disabled", "checked", "selected", "expanded", "pressed", "focused", "readonly", "required", "inputType", "placeholder", "value", "valueTruncated", "options", "optionCount", "optionsTruncated", "scrollable", "scrollAbove", "scrollBelow"} {
+			if v, ok := e[key]; ok {
+				value, _ := json.Marshal(v)
+				fmt.Fprintf(&text, " %s=%s", key, value)
+			}
+		}
+		text.WriteByte('\n')
+	}
+	for _, frame := range obs.Frames {
+		if frame["supported"] == false {
+			fmt.Fprintf(&text, "|IFRAME unsupported| id=%s url=%q; use raw CDP or coordinates\n", frame["id"], frame["url"])
+		}
+	}
+	if obs.Text != "" {
+		fmt.Fprintln(&text, "text:")
+		fmt.Fprintln(&text, obs.Text)
+	}
+	if obs.Truncated {
+		text.WriteString("[truncated]\n")
+	}
+	if len(obs.Continuation) > 0 {
+		next, _ := json.Marshal(obs.Continuation)
+		fmt.Fprintf(&text, "continuation=%s\n", next)
+	} else if obs.Next != nil {
+		next, _ := json.Marshal(obs.Next)
+		fmt.Fprintf(&text, "next=%s\n", next)
+	}
+	_, err := io.WriteString(out, text.String())
 	return err
 }
-
-type elementText struct{ Ref, Role, Name string }

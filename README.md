@@ -29,7 +29,7 @@ cdp observe
 
 | Capability | What you get |
 | --- | --- |
-| **Small observations** | Accessible roles, names and fresh element references; a 12 KiB default response budget with explicit truncation. |
+| **Small observations** | Roles, names, live states, context and element references; a 12 KiB default response budget with explicit truncation. |
 | **Precise actions** | References, role/name, CSS or click coordinates. Ambiguous and covered targets return useful errors. |
 | **Persistent sessions** | One binary with a local controller; independent tab selections for each agent context. |
 | **Clear recovery** | Structured errors and `none` / `possible` / `confirmed` effects. The agent chooses the next step. |
@@ -78,9 +78,10 @@ cdp wait --css '#result' --state visible
 cdp observe
 ```
 
-Navigation, reconnects, removed elements and a new observation in the same context
-invalidate references. A dispatched click confirms the input operation; observe
-again to determine whether the task succeeded. If an error reports
+The latest three observations per context and tab retain their references.
+Navigation, reconnects, removed elements and controller restarts invalidate them.
+A dispatched click confirms the input operation; observe again to determine
+whether the task succeeded. If an error reports
 `effect: "possible"`, inspect the page before retrying.
 
 ```json
@@ -108,16 +109,21 @@ cdp call Browser.getVersion --scope browser
 
 | Area | Commands |
 | --- | --- |
-| Connection | `connect`, `disconnect`, `status`, `doctor` |
+| Connection | `connect`, `reconnect`, `disconnect`, `browsers`, `status`, `doctor` |
 | Tabs | `tabs`, `tab new`, `tab use`, `tab activate`, `tab close` |
 | Navigation | `goto`, `back`, `forward`, `reload`, `info` |
-| Observe and act | `observe`, `screenshot`, `click`, `fill`, `type`, `press`, `scroll`, `wait` |
+| Observe and act | `observe`, `read`, `options`, `screenshot`, `click`, `fill`, `focus`, `check`, `select`, `type`, `press`, `scroll`, `wait` |
 | Advanced | `eval`, `call`, `help`, `schema`, `version`, `controller stop` |
 
 Contexts share browser cookies and permissions, while keeping their tab selections
-separate. High-level targeting supports the main frame and open shadow DOM through
-accessibility references. Child-frame actions use raw CDP or coordinates. `fill`
-supports text inputs and textareas; custom editors need an explicit workflow.
+separate. Observations expose live state, semantic context, scroll information and
+nested open/closed shadow boundaries. High-level targeting supports the main frame
+and author shadow DOM through references. Child-frame actions use raw CDP or
+coordinates. `fill` supports text inputs, textareas and contenteditable surfaces.
+
+Read the [agent observation contract](docs/agent-observations.md) for compact tree
+output, immutable text continuation, reference retention and browser-use design
+references. `check` and `select` verify the desired state and avoid duplicate changes.
 
 See the [usage guide](docs/usage.md) for deadlines, output limits, exit codes,
 environment variables, supported inputs and screenshot behavior.
@@ -142,5 +148,5 @@ CDPSH_TEST_BROWSER=/path/to/chromium CDPSH_TEST_RACE=1 go test -tags integration
 Windows setup and acceptance-test details are in the [usage guide](docs/usage.md#development-and-verification).
 The existing `CDPSH_*` environment variables remain supported.
 
-**v0.1 scope:** browser connection and control. Browser hosting, batch execution,
+**v0.2 scope:** browser connection and control. Browser hosting, batch execution,
 MCP and the optional agent skill are deferred; see the [specification](SPEC.md).

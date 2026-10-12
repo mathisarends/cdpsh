@@ -7,13 +7,13 @@ import (
 	"unicode/utf8"
 )
 
-const Version = "0.1.0"
+const Version = "0.2.0"
 const MaxInput = 8 << 20
 const OutputBudget = 12 << 10
 
 func MayMutate(command string) bool {
 	switch command {
-	case "goto", "back", "forward", "reload", "click", "fill", "type", "press", "scroll", "eval", "call", "tab new", "tab close", "tab activate":
+	case "goto", "back", "forward", "reload", "click", "fill", "type", "press", "scroll", "focus", "check", "select", "eval", "call", "tab new", "tab close", "tab activate":
 		return true
 	default:
 		return false
@@ -32,11 +32,20 @@ type Request struct {
 }
 
 type Error struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Effect  string `json:"effect"`
-	Next    string `json:"next,omitempty"`
-	Details any    `json:"details,omitempty"`
+	Code     string      `json:"code"`
+	Message  string      `json:"message"`
+	Effect   string      `json:"effect"`
+	Next     string      `json:"next,omitempty"`
+	Details  any         `json:"details,omitempty"`
+	Recovery *Invocation `json:"recovery,omitempty"`
+}
+
+// Structured invocations preserve aliases and contexts without shell quoting or
+// interpolating page-controlled strings into executable command hints.
+type Invocation struct {
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Flags   map[string]string `json:"flags,omitempty"`
 }
 
 func (e *Error) Error() string { return e.Message }

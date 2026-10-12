@@ -60,7 +60,13 @@ func Call(ctx context.Context, home string, req protocol.Request, start bool) pr
 		}
 	}
 	if err != nil {
-		return protocol.Failure("", protocol.Fail("NO_BROWSER", "No controller is running; use connect --endpoint URL"))
+		next := protocol.Invocation{Command: "connect", Flags: map[string]string{"browser": req.Browser, "context": req.Context}}
+		if req.Command == "doctor" {
+			return protocol.Success("", map[string]any{"version": protocol.Version, "browser": req.Browser, "context": req.Context, "connected": false, "selectedTab": "", "checks": map[string]bool{"controller": false, "cdp": false, "selectedTab": false}, "next": "connect --endpoint URL", "nextCommand": next, "browsers": []any{}})
+		}
+		e := protocol.Fail("NO_BROWSER", "No controller is running; use connect --endpoint URL")
+		e.Recovery = &next
+		return protocol.Failure("", e)
 	}
 	defer conn.Close()
 	if deadline, ok := ctx.Deadline(); ok {

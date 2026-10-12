@@ -34,6 +34,12 @@ func (c *Controller) execute(ctx context.Context, t *tab, r protocol.Request) (a
 		return out, nil
 	case "observe":
 		return c.observe(ctx, t, r)
+	case "read":
+		return c.read(ctx, t, r)
+	case "options":
+		return c.options(ctx, t, r)
+	case "focus", "check", "select":
+		return c.control(ctx, t, r)
 	case "goto", "back", "forward", "reload":
 		return c.navigate(ctx, t, r)
 	case "click":
@@ -131,13 +137,8 @@ func (c *Controller) click(ctx context.Context, t *tab, r protocol.Request) (any
 		}
 		x, y = l.X, l.Y
 	}
-	for _, kind := range []string{"mousePressed", "mouseReleased"} {
-		if err := t.call(ctx, "Input.dispatchMouseEvent", map[string]any{"type": kind, "x": x, "y": y, "button": "left", "clickCount": 1}, nil); err != nil {
-			cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			_ = t.call(cleanup, "Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1}, nil)
-			return nil, protocol.Effect(err, "possible")
-		}
+	if err := t.dispatchClick(ctx, x, y); err != nil {
+		return nil, err
 	}
 	return map[string]any{"effect": "confirmed"}, nil
 }
@@ -147,9 +148,9 @@ func (c *Controller) fill(ctx context.Context, t *tab, r protocol.Request) (any,
 		return nil, err
 	}
 	if !l.Editable {
-		return nil, protocol.Fail("NOT_EDITABLE", "Target is not a supported editable input or textarea")
+		return nil, protocol.Fail("NOT_EDITABLE", "Target is not a supported editable input, textarea or contenteditable")
 	}
-	if _, err = t.function(ctx, id, `function(){this.focus();this.select();return true}`); err != nil {
+	if _, err = t.function(ctx, id, `function(){this.focus();if(this.isContentEditable){const range=document.createRange();range.selectNodeContents(this);const selection=document.getSelection();selection.removeAllRanges();selection.addRange(range)}else this.select();return true}`); err != nil {
 		return nil, protocol.Effect(err, "possible")
 	}
 	if r.Payload == "" {
@@ -160,7 +161,7 @@ func (c *Controller) fill(ctx context.Context, t *tab, r protocol.Request) (any,
 	if err != nil {
 		return nil, protocol.Effect(err, "possible")
 	}
-	value, err := t.function(ctx, id, `function(){return this.value}`)
+	value, err := t.function(ctx, id, `function(){return this.isContentEditable?this.innerText:this.value}`)
 	if err != nil {
 		return nil, protocol.Effect(err, "possible")
 	}
@@ -423,7 +424,7 @@ func (c *Controller) navigate(ctx context.Context, t *tab, r protocol.Request) (
 		return nil, protocol.Effect(err, "possible")
 	}
 	t.mu.Lock()
-	t.observations = map[string]*observation{}
+	t.observations = map[string][]*observation{}
 	t.mu.Unlock()
 	state := r.Flags["state"]
 	if state == "" {
