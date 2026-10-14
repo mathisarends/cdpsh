@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"unicode/utf8"
 
-	"cdpsh/internal/protocol"
 	"github.com/chromedp/cdproto/cdp"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 type reference struct {
@@ -280,6 +280,10 @@ func (c *Controller) observe(ctx context.Context, t *tab, r protocol.Request) (a
 		return nil, &protocol.Error{Code: "STALE_REF", Message: "Document changed during observation", Effect: "none", Next: "observe"}
 	}
 	t.mu.Lock()
+	if t.dead {
+		t.mu.Unlock()
+		return nil, protocol.Fail("TAB_CLOSED", "Selected tab was closed during observation")
+	}
 	t.observations[r.Context] = append(t.observations[r.Context], o)
 	if len(t.observations[r.Context]) > 3 {
 		t.observations[r.Context] = t.observations[r.Context][len(t.observations[r.Context])-3:]

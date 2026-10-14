@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  pull_request:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - run: go vet ./...
+      - name: Build release archives
+        shell: bash
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          version=$(go run ./cmd/cdp version | jq -er '.result.version')
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match CLI version v$version" >&2
+            exit 1
+          fi
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*}
+            arch=${target#*/}
+            staging=$(mktemp -d)
+            binary=cdp
+            if [[ "$os" == windows ]]; then binary=cdp.exe; fi
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags='-s -w' -o "$staging/$binary" ./cmd/cdp
+            cp README.md SPEC.md "$staging/"
+            cp -R docs "$staging/"
+            archive="cdp_${version}_${os}_${arch}"
+            if [[ "$os" == windows ]]; then
+              (cd "$staging" && zip -qr "$GITHUB_WORKSPACE/dist/$archive.zip" "$binary" README.md SPEC.md docs)
+            else
+              tar -C "$staging" -czf "dist/$archive.tar.gz" "$binary" README.md SPEC.md docs
+            fi
+          done
+          (cd dist && sha256sum *.tar.gz *.zip > SHA256SUMS)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-archives
+          path: dist/*
+          if-no-files-found: error
+
+  draft-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-archives
+          path: dist
+      - name: Create release draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --draft --generate-notes

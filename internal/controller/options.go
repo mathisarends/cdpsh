@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"cdpsh/internal/protocol"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 func (c *Controller) options(ctx context.Context, t *tab, r protocol.Request) (any, error) {

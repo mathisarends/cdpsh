@@ -12,11 +12,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"cdpsh/internal/protocol"
 	"github.com/chromedp/cdproto"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"github.com/go-json-experiment/json/jsontext"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 type Event struct {

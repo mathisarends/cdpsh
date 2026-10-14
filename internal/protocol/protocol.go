@@ -7,7 +7,7 @@ import (
 	"unicode/utf8"
 )
 
-const Version = "0.2.0"
+const Version = "1.0.0"
 const MaxInput = 8 << 20
 const OutputBudget = 12 << 10
 

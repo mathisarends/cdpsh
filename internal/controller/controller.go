@@ -14,11 +14,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"cdpsh/internal/ipc"
-	"cdpsh/internal/protocol"
-	"cdpsh/internal/transport"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/target"
+	"github.com/mathisarends/cdpsh/internal/ipc"
+	"github.com/mathisarends/cdpsh/internal/protocol"
+	"github.com/mathisarends/cdpsh/internal/transport"
 )
 
 type Controller struct {
@@ -46,6 +46,7 @@ type tab struct {
 	observations map[string][]*observation
 	queue        []*job
 	wake         chan struct{}
+	closed       chan struct{}
 }
 type job struct {
 	ctx       context.Context
@@ -133,10 +134,7 @@ func (b *browser) event(e transport.Event) {
 		}
 		_ = json.Unmarshal(e.Params, &p)
 		if t := b.tabs[p.TargetID]; t != nil {
-			t.mu.Lock()
-			t.dead = true
-			t.observations = map[string][]*observation{}
-			t.mu.Unlock()
+			t.retire(protocol.Fail("TAB_CLOSED", "Selected tab was closed; explicitly select another tab"))
 		}
 		return
 	}
@@ -145,13 +143,14 @@ func (b *browser) event(e transport.Event) {
 	}
 	for _, t := range b.tabs {
 		t.mu.Lock()
-		if t.session == e.Session {
+		matched := t.session == e.Session
+		if matched {
 			t.observations = map[string][]*observation{}
-			if e.Method == "Inspector.detached" {
-				t.dead = true
-			}
 		}
 		t.mu.Unlock()
+		if matched && e.Method == "Inspector.detached" {
+			t.retire(protocol.Fail("TAB_CLOSED", "Selected tab was detached; reconnect before using it again"))
+		}
 	}
 }
 func (b *browser) getTab(id string) *tab {
@@ -160,11 +159,31 @@ func (b *browser) getTab(id string) *tab {
 	if t := b.tabs[id]; t != nil {
 		return t
 	}
-	t := &tab{id: id, browser: b, wake: make(chan struct{}, 1), observations: map[string][]*observation{}}
+	t := &tab{id: id, browser: b, wake: make(chan struct{}, 1), closed: make(chan struct{}), observations: map[string][]*observation{}}
 	b.tabs[id] = t
 	go t.worker()
 	return t
 }
+
+// Stop accepting work immediately and fail queued jobs without dispatching them.
+// The running job keeps its own result/effect; its worker removes this tab on exit.
+func (t *tab) retire(err error) {
+	t.mu.Lock()
+	if t.dead {
+		t.mu.Unlock()
+		return
+	}
+	t.dead = true
+	t.observations = nil
+	queued := t.queue
+	t.queue = nil
+	close(t.closed)
+	t.mu.Unlock()
+	for _, j := range queued {
+		j.done <- outcome{err: err}
+	}
+}
+
 func (t *tab) enqueue(j *job) {
 	select {
 	case <-t.browser.client.Done:
@@ -173,6 +192,11 @@ func (t *tab) enqueue(j *job) {
 	default:
 	}
 	t.mu.Lock()
+	if t.dead {
+		t.mu.Unlock()
+		j.done <- outcome{err: protocol.Fail("TAB_CLOSED", "Selected tab was closed; explicitly select another tab")}
+		return
+	}
 	t.queue = append(t.queue, j)
 	t.mu.Unlock()
 	select {
@@ -181,8 +205,20 @@ func (t *tab) enqueue(j *job) {
 	}
 }
 func (t *tab) worker() {
+	defer func() {
+		t.retire(protocol.Fail("CONNECTION_LOST", "Browser connection lost; reconnect before retrying"))
+		t.browser.mu.Lock()
+		if t.browser.tabs[t.id] == t {
+			delete(t.browser.tabs, t.id)
+		}
+		t.browser.mu.Unlock()
+	}()
 	for {
 		t.mu.Lock()
+		if t.dead {
+			t.mu.Unlock()
+			return
+		}
 		var j *job
 		if len(t.queue) > 0 {
 			j = t.queue[0]
@@ -194,6 +230,8 @@ func (t *tab) worker() {
 			select {
 			case <-t.wake:
 				continue
+			case <-t.closed:
+				return
 			case <-t.browser.client.Done:
 				return
 			}
@@ -204,6 +242,10 @@ func (t *tab) worker() {
 		}
 		if err := t.attach(j.ctx); err != nil {
 			j.done <- outcome{err: err}
+			var pe *protocol.Error
+			if errors.As(err, &pe) && (pe.Code == "TAB_CLOSED" || pe.Code == "CONNECTION_LOST") {
+				t.retire(err)
+			}
 			continue
 		}
 		j.started.Store(true)
@@ -241,6 +283,10 @@ func (t *tab) attach(ctx context.Context) error {
 		return protocol.Fail("TAB_CLOSED", "Target is unavailable; list tabs and explicitly select one")
 	}
 	t.mu.Lock()
+	if t.dead {
+		t.mu.Unlock()
+		return protocol.Fail("TAB_CLOSED", "Selected tab was closed during attachment")
+	}
 	t.session = res.SessionID
 	t.mu.Unlock()
 	for _, method := range []string{"Page.enable", "Runtime.enable", "DOM.enable", "Accessibility.enable"} {
@@ -534,10 +580,7 @@ func (c *Controller) browserCommand(ctx context.Context, b *browser, r protocol.
 			return nil, protocol.Effect(err, "possible")
 		}
 		if r.Command == "tab close" {
-			t.mu.Lock()
-			t.dead = true
-			t.observations = map[string][]*observation{}
-			t.mu.Unlock()
+			t.retire(protocol.Fail("TAB_CLOSED", "Selected tab was closed; explicitly select another tab"))
 		}
 		return map[string]any{"id": id, "effect": "confirmed"}, nil
 	}, true)

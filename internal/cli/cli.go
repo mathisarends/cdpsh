@@ -13,9 +13,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"cdpsh/internal/controller"
-	"cdpsh/internal/ipc"
-	"cdpsh/internal/protocol"
+	"github.com/mathisarends/cdpsh/internal/controller"
+	"github.com/mathisarends/cdpsh/internal/ipc"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 type Flag struct {

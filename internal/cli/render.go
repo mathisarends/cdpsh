@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"cdpsh/internal/protocol"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 func renderText(out io.Writer, r protocol.Response) error {

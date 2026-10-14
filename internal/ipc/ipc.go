@@ -1,12 +1,12 @@
 package ipc
 
 import (
-	"cdpsh/internal/protocol"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 	"io"
 	"net"
 	"os"

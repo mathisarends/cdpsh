@@ -5,7 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"cdpsh/internal/protocol"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 func TestTextContinuationPreservesEveryUTF8Byte(t *testing.T) {

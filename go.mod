@@ -1,4 +1,4 @@
-module cdpsh
+module github.com/mathisarends/cdpsh
 
 go 1.24
 

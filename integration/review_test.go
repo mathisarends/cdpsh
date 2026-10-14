@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"cdpsh/internal/protocol"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 func testReviewRegressions(t *testing.T, h *harness) {
@@ -16,6 +16,73 @@ func testReviewRegressions(t *testing.T, h *harness) {
 	}
 	tab := ok(t, call("tab", "new"))["id"].(string)
 	defer h.call("tab", "close", tab)
+
+	t.Run("empty contenteditable verifies browser placeholder", func(t *testing.T) {
+		ok(t, call("eval", "--expression", `document.body.innerHTML='<div id="editor" contenteditable="true" role="textbox">Old text</div>';true`))
+		for _, text := range []string{"", "First\nSecond", "", "Third\nFourth", ""} {
+			response := h.run(text, "--context", "review", "fill", "--css", "#editor", "--text-file", "-")
+			if !response.OK {
+				t.Fatalf("fill %q failed: %+v; editor=%v", text, response.Error, call("eval", "--expression", `({text:document.querySelector('#editor').textContent,innerText:document.querySelector('#editor').innerText,html:document.querySelector('#editor').innerHTML})`).Result)
+			}
+			result := ok(t, response)
+			if result["verified"] != true || result["effect"] != "confirmed" {
+				t.Fatalf("fill %q did not verify: %v", text, result)
+			}
+		}
+		// Empty normalization must not hide a deletion rejected by the editor.
+		ok(t, call("eval", "--expression", `document.querySelector('#editor').textContent='Kept text';document.querySelector('#editor').addEventListener('keydown',e=>e.preventDefault());true`))
+		rejected := h.run("", "--context", "review", "fill", "--css", "#editor", "--text-file", "-")
+		code(t, rejected, "EXECUTION_ERROR")
+		if rejected.Error.Effect != "possible" {
+			t.Fatal("rejected deletion lost its possible effect")
+		}
+		if call("eval", "--expression", `document.querySelector('#editor').textContent`).Result != "Kept text" {
+			t.Fatal("rejected deletion modified the editor")
+		}
+	})
+
+	t.Run("disabled ancestors block input through shadow and slots", func(t *testing.T) {
+		ok(t, call("eval", "--expression", `
+document.body.innerHTML='<div aria-disabled="true"><button id="disabled" onclick="window.disabledClicked=true">Disabled action</button><input id="disabledInput" value="old"></div><div id="host" aria-disabled="true"></div><div id="slots" aria-disabled="true"><button slot="action" id="slotted">Slotted disabled</button></div>';
+document.querySelector('#host').attachShadow({mode:'closed'}).innerHTML='<button>Shadow disabled</button>';
+document.querySelector('#slots').attachShadow({mode:'open'}).innerHTML='<slot name="action"></slot>';
+true`))
+		observation := call("observe")
+		for _, name := range []string{"Disabled action", "Shadow disabled", "Slotted disabled"} {
+			if observed(t, observation, name)["disabled"] != true {
+				t.Fatalf("%q did not inherit disabled state", name)
+			}
+			blocked := call("click", "--ref", ref(t, observation, name))
+			code(t, blocked, "DISABLED")
+			if blocked.Error.Effect != "none" {
+				t.Fatal("blocked click reported an input effect")
+			}
+		}
+		code(t, call("fill", "--css", "#disabledInput", "--text", "changed"), "DISABLED")
+		code(t, call("wait", "--css", "#disabled", "--state", "enabled", "--timeout", "100ms"), "TIMEOUT")
+		if call("eval", "--expression", `window.disabledClicked===true || document.querySelector('#disabledInput').value!=='old'`).Result != false {
+			t.Fatal("disabled descendants received input")
+		}
+		ok(t, call("eval", "--expression", `document.querySelector('[aria-disabled]').removeAttribute('aria-disabled');true`))
+		ok(t, call("click", "--css", "#disabled"))
+		if call("eval", "--expression", `window.disabledClicked===true`).Result != true {
+			t.Fatal("reenabled descendant could not be clicked")
+		}
+	})
+
+	t.Run("shifted digits dispatch the correct character and key", func(t *testing.T) {
+		ok(t, call("eval", "--expression", `document.body.innerHTML='<input id="keys">';window.keyEvents=[];document.querySelector('#keys').addEventListener('keydown',e=>keyEvents.push({key:e.key,code:e.code,shift:e.shiftKey}));true`))
+		ok(t, call("focus", "--css", "#keys"))
+		for _, chord := range []string{"Shift+1", "Shift+0", "1", "Shift+A"} {
+			ok(t, call("press", chord))
+		}
+		if call("eval", "--expression", `document.querySelector('#keys').value`).Result != "!)1A" {
+			t.Fatal("shifted digits produced the wrong text")
+		}
+		if call("eval", "--expression", `keyEvents[0].key==='!' && keyEvents[0].code==='Digit1' && keyEvents[0].shift`).Result != true {
+			t.Fatal("shifted key event did not match the physical digit key")
+		}
+	})
 
 	t.Run("scroll container text respects scope", func(t *testing.T) {
 		ok(t, call("eval", "--expression", `

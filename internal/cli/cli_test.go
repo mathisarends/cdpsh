@@ -2,8 +2,8 @@ package cli
 
 import (
 	"bytes"
-	"cdpsh/internal/protocol"
 	"encoding/json"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 	"strings"
 	"testing"
 )

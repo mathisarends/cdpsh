@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"cdpsh/internal/protocol"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 func observed(t *testing.T, r protocol.Response, name string) map[string]any {

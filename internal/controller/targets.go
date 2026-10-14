@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"cdpsh/internal/protocol"
 	"github.com/chromedp/cdproto/accessibility"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 // Decode only the AX fields we use. cdproto's generated enum unmarshallers

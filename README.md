@@ -38,7 +38,19 @@ cdp observe
 
 ## Quickstart
 
-Build with **Go 1.24+**:
+Download the archive for your operating system and architecture from
+[Releases](https://github.com/mathisarends/cdpsh/releases), extract it and add
+`cdp` (`cdp.exe` on Windows) to your `PATH`. Releases include Linux, macOS and
+Windows binaries for amd64 and arm64, documentation and SHA-256 checksums.
+
+Alternatively, install with **Go 1.24+**:
+
+```sh
+go install github.com/mathisarends/cdpsh/cmd/cdp@latest
+```
+
+Add Go's binary directory (`GOBIN`, or `GOPATH/bin` when unset) to your `PATH`.
+To build a source checkout:
 
 ```sh
 git clone https://github.com/mathisarends/cdpsh.git
@@ -148,5 +160,7 @@ CDPSH_TEST_BROWSER=/path/to/chromium CDPSH_TEST_RACE=1 go test -tags integration
 Windows setup and acceptance-test details are in the [usage guide](docs/usage.md#development-and-verification).
 The existing `CDPSH_*` environment variables remain supported.
 
-**v0.2 scope:** browser connection and control. Browser hosting, batch execution,
+**v1 scope:** browser connection and control. Browser hosting, batch execution,
 MCP and the optional agent skill are deferred; see the [specification](SPEC.md).
+The [release guide](docs/releasing.md) describes archive validation and creating
+a release draft from a version tag.
