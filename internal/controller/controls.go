@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"cdpsh/internal/protocol"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 // Resolve once, read state before scrolling, and validate geometry only when

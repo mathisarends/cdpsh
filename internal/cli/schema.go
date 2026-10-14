@@ -106,7 +106,7 @@ func commandConstraints(command string) []string {
 	case "wait":
 		c = append(c, "Choose --url, a page --state domcontentloaded|load, or a target with --state visible|hidden|enabled")
 	case "press":
-		c = append(c, "Keys: Enter, Tab, Escape, Backspace, Delete, Space, ArrowLeft/Up/Right/Down, Home, End, PageUp/Down, letters, digits", "Modifiers: Ctrl/Control, Alt, Shift, Meta/Cmd/Command separated by +")
+		c = append(c, "Keys: Enter, Tab, Escape, Backspace, Delete, Space, ArrowLeft/Up/Right/Down, Home, End, PageUp/Down, letters, digits", "Modifiers: Ctrl/Control, Alt, Shift, Meta/Cmd/Command separated by +", "Letters and shifted digits use a US keyboard layout; use type/fill for exact text")
 	case "call":
 		c = append(c, "Parameters must be a JSON object; exactly one optional params source; - means stdin", "--scope tab is default; use --scope browser for browser methods")
 	}

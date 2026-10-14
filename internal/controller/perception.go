@@ -7,8 +7,8 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"cdpsh/internal/protocol"
 	"github.com/chromedp/cdproto/cdp"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 // DOM supplies ancestry and shadow boundaries; AX supplies semantics; snapshots

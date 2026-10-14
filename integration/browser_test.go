@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"cdpsh/internal/protocol"
-	"cdpsh/internal/transport"
+	"github.com/mathisarends/cdpsh/internal/protocol"
+	"github.com/mathisarends/cdpsh/internal/transport"
 )
 
 const fixture = `<!doctype html><html><head><title>cdp fixture</title><style>body{font:16px sans-serif;padding:24px}input,button{display:block;margin:12px}#covered{position:absolute;left:450px;top:60px;width:100px;height:40px}#overlay{position:absolute;left:440px;top:50px;width:140px;height:70px;background:#777;z-index:10}#scroller{height:80px;width:200px;overflow:auto}#long{height:900px}</style></head><body>

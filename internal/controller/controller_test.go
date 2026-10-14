@@ -1,9 +1,9 @@
 package controller
 
 import (
-	"cdpsh/internal/protocol"
 	"context"
 	"encoding/json"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 	"os"
 	"strings"
 	"testing"

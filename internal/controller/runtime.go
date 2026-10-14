@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 
-	"cdpsh/internal/protocol"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 func (t *tab) evaluate(ctx context.Context, expression string) (json.RawMessage, error) {

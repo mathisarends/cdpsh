@@ -4,9 +4,21 @@ A Go browser CLI for agents. Each invocation emits one compact JSON result and
 uses a persistent local controller connected to an **existing** Chromium browser.
 Recovery decisions belong to the agent; actions are never automatically replayed.
 
-## Build
+## Install or build
 
-Go 1.24 or newer:
+Prebuilt archives are available from [Releases](https://github.com/mathisarends/cdpsh/releases)
+for Linux, macOS and Windows, each with amd64 and arm64 variants. Extract the
+matching archive and put its `cdp` executable on your `PATH`. The `SHA256SUMS`
+file lists the SHA-256 digest of each archive. Each archive includes this guide.
+
+With Go 1.24 or newer, install directly from the repository:
+
+```sh
+go install github.com/mathisarends/cdpsh/cmd/cdp@latest
+```
+
+Go installs the command into `GOBIN` or, when unset, `GOPATH/bin`; add that
+directory to your `PATH`. To build a local checkout:
 
 ```sh
 go build -o bin/cdp ./cmd/cdp
@@ -52,6 +64,8 @@ document's querySelectorAll.
 contenteditable surfaces, sends browser input, and verifies the value. `type`
 inserts text at the current
 focus. `press` sends keyboard events, e.g. `Ctrl+A`, `Enter`, or `Shift+Tab`.
+Letters and shifted digits use a US keyboard layout (`Shift+1` enters `!`).
+Use `type` or `fill` for exact text independent of keyboard layout.
 Number, date and file inputs have no high-level fill contract. Custom editors
 may reject or transform input, producing a verification error with a possible effect.
 `focus TARGET` verifies focus, including within closed roots. `check TARGET --checked
@@ -61,7 +75,8 @@ true|false` sets a checkbox/switch/radio state; `select TARGET --value VALUE`,
 five. Matching states are no-ops without scrolling; both actions verify their
 result. Scrolling uses
 the DOM scrolling APIs; clicks use CDP input after visibility, enabled-state and
-hit-test checks.
+hit-test checks. Disabled state includes `aria-disabled="true"` on composed
+ancestors, including author shadow hosts and assigned slots.
 
 ## Commands and discovery
 
@@ -158,6 +173,9 @@ fill responses or read into observations.
 on Windows and a Unix socket with mode `0600` on Linux/macOS. The controller has
 no public HTTP listener. `disconnect` removes a browser connection; `controller
 stop` stops the local controller. Both leave browser tabs open.
+Closed or detached tabs release their workers and retained observations. Queued
+actions against them fail with `TAB_CLOSED` and `effect:none`; running operations
+keep their own result and effect classification.
 
 | Variable | Default / purpose |
 | --- | --- |

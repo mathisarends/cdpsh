@@ -4,7 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"cdpsh/internal/protocol"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 func invocation(r protocol.Request, command string) protocol.Invocation {

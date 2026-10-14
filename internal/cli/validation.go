@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"cdpsh/internal/protocol"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 // The parser and the published schemas use the same flag types and bounds.

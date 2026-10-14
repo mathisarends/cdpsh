@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"cdpsh/internal/protocol"
 	"github.com/chromedp/cdproto/runtime"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 func (c *Controller) execute(ctx context.Context, t *tab, r protocol.Request) (any, error) {
@@ -166,7 +166,13 @@ func (c *Controller) fill(ctx context.Context, t *tab, r protocol.Request) (any,
 	if err != nil {
 		return nil, protocol.Effect(err, "possible")
 	}
-	value, err := t.function(ctx, id, `function(){return this.isContentEditable?this.innerText:this.value}`)
+	value, err := t.function(ctx, id, `function(expected){
+ if(!this.isContentEditable)return this.value;
+ const text=this.innerText;
+ // Chromium keeps a placeholder <br> when an editor is cleared through input.
+ // Normalize it only for an empty request, preserving intentionally entered lines.
+ return expected==="" && this.textContent==="" && /^\n*$/.test(text) ? "" : text;
+}`, r.Payload)
 	if err != nil {
 		return nil, protocol.Effect(err, "possible")
 	}
@@ -213,7 +219,11 @@ func KeySpec(chord string) (key, int, error) {
 			k = key{text, "Key" + string(ch), text, int(ch)}
 			ok = true
 		} else if ch >= '0' && ch <= '9' {
-			k = key{name, "Digit" + name, name, int(ch)}
+			text := name
+			if mod&8 != 0 {
+				text = string(")!@#$%^&*("[ch-'0'])
+			}
+			k = key{text, "Digit" + name, text, int(ch)}
 			ok = true
 		}
 	}

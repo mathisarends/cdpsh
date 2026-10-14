@@ -1,8 +1,18 @@
 # cdp — Specification
 
-Status: v0.2 implemented. The original v0.1 design follows; the v0.2 amendments
+Status: v1.0 implemented. The original v0.1 design follows; the v0.2 amendments
 below supersede its reference lifetime, observation and command contracts. See
 README.md and docs/agent-observations.md for current behavior.
+
+## v1.0 release preparation
+
+- Closed and detached tabs release controller workers and fail queued input with
+  `TAB_CLOSED` and `effect:none` without replaying it.
+- Actionability and observations inherit ARIA disabled state through composed
+  ancestors. Empty contenteditable input verifies Chromium's placeholder line.
+- Shifted digits use the documented US keyboard mapping; exact text uses fill/type.
+- The canonical Go module path supports `go install`. Release CI builds six
+  platform/architecture archives with checksums and creates a draft on version tags.
 
 ## v0.2 amendments
 
@@ -25,7 +35,7 @@ README.md and docs/agent-observations.md for current behavior.
 - Child-frame high-level actions remain unsupported and are explicitly surfaced.
   No full browser-use parity, browser hosting or automatic action replay is claimed.
 
-Updated: October 12, 2026.
+Updated: October 14, 2026.
 
 cdp is a lightweight browser CLI written in Go for agents. It connects to an
 existing Chromium browser through the Chrome DevTools Protocol (CDP) and provides

@@ -15,7 +15,7 @@ function layout(scroll, hit) {
   for (let p = e; p; p = p.assignedSlot || p.parentElement || p.getRootNode().host) {
     const ps = getComputedStyle(p);
     if (ps.opacity === "0" || ps.display === "none" || p.hidden) visible = false;
-    if (p.inert) disabled = true;
+    if (p.inert || p.getAttribute("aria-disabled") === "true") disabled = true;
     if (p !== e) {
       const b = p.getBoundingClientRect();
       if (/auto|scroll|hidden|clip/.test(ps.overflowX)) {

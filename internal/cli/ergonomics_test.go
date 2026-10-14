@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"cdpsh/internal/protocol"
+	"github.com/mathisarends/cdpsh/internal/protocol"
 )
 
 func TestErgonomicArguments(t *testing.T) {
